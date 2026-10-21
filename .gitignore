@@ -17,6 +17,10 @@ adult/
 # Code moved aside until its phase arrives (see README)
 .deferred/
 
+# Fitted preprocessor and other generated artifacts.
+# Regenerate with `python validate_and_preprocess.py`.
+artifacts/
+
 # OS / editor
 .DS_Store
 .vscode/

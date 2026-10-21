@@ -15,6 +15,11 @@ RAW_CACHE_PATH = DATA_DIR / "adult_raw.csv"
 DOCS_DIR = PROJECT_ROOT / "docs"
 EXPLORATION_REPORT_PATH = DOCS_DIR / "dataset_exploration.md"
 
+# Fitted objects are saved here so that every monitoring batch is processed
+# with the exact same preprocessor that was fitted on the training data.
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+PREPROCESSOR_PATH = ARTIFACTS_DIR / "preprocessor.joblib"
+
 # The Adult / Census Income dataset is id=2 in the UCI ML Repository.
 UCI_DATASET_ID = 2
 UCI_DATASET_URL = "https://archive.ics.uci.edu/dataset/2/adult"

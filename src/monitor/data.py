@@ -58,7 +58,7 @@ def load_raw_data(
 
 
 def clean_data(raw_df: pd.DataFrame) -> pd.DataFrame:
-    """Apply the two cleaning steps described in the module docstring."""
+    """Apply the three cleaning steps described in the module docstring."""
     df = raw_df.copy()
     df.columns = [column.replace("-", "_") for column in df.columns]
 

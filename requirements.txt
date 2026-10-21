@@ -1,7 +1,10 @@
 # Phase 1: project setup and dataset exploration.
-# Later phases will add scikit-learn, Streamlit, Plotly and friends.
 pandas
 numpy
 ucimlrepo
 tabulate
 pytest
+
+# Phase 2: validation and preprocessing.
+scikit-learn
+joblib
