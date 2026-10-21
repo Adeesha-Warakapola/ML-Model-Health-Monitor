@@ -1,0 +1,7 @@
+# Phase 1: project setup and dataset exploration.
+# Later phases will add scikit-learn, Streamlit, Plotly and friends.
+pandas
+numpy
+ucimlrepo
+tabulate
+pytest

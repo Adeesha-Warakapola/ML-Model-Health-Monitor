@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Datasets - downloaded from UCI, reproducible via `python explore_dataset.py`.
+# Not committed: the project should fetch its own copy rather than vendor one.
+data/
+adult/
+
+# Code moved aside until its phase arrives (see README)
+.deferred/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
