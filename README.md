@@ -9,14 +9,15 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 3 complete — baseline model trained and evaluated
+## Status: Phase 4 complete — prediction engine and batch simulation
 
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Project setup, dataset loading and exploration | Done |
 | 2 | Schema, batch validation, preprocessing pipeline | Done |
 | 3 | Baseline model training and evaluation | Done |
-| 4+ | Drift detection, monitoring history, alerts, dashboard | Not started |
+| 4 | Prediction service and reproducible batch simulation | Done |
+| 5+ | Drift detection, monitoring history, alerts, dashboard | Not started |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -75,6 +76,7 @@ python -c "import pandas, numpy, sklearn, ucimlrepo, tabulate, joblib; print('de
 python explore_dataset.py
 python validate_and_preprocess.py
 python train_baseline.py
+python simulate_batches.py
 python -m pytest -q
 ```
 
@@ -84,7 +86,8 @@ python -m pytest -q
 | `python explore_dataset.py` | Dataset downloads and is inspectable | A summary table, then `Report written to .../docs/dataset_exploration.md` |
 | `python validate_and_preprocess.py` | Validation and preprocessing work end to end | Validation summaries, then `Fitted preprocessor saved to .../artifacts/preprocessor.joblib` |
 | `python train_baseline.py` | The baseline trains, scores and saves | Metrics tables, then three `saved to` lines |
-| `python -m pytest -q` | All code works | `124 passed` |
+| `python simulate_batches.py` | Batches are drawn from unseen data and scored | `Overlap 0 rows`, per-batch summaries, a variation table |
+| `python -m pytest -q` | All code works | `192 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -93,6 +96,14 @@ Extra flags for `train_baseline.py`:
 | `--search` | Also cross-validate the regularisation strength `C` |
 | `--compare` | Also train a Random Forest and print a side-by-side table |
 | `--threshold 0.5` | Use a fixed threshold instead of selecting one |
+
+Extra flags for `simulate_batches.py`:
+
+| Flag | Effect |
+| --- | --- |
+| `--batches N --size N` | How many batches, and how many rows each |
+| `--seed N` | Change the sampling seed |
+| `--demo-modifier` | Show the controlled-change hook Phase 5 will use |
 
 Run `explore_dataset.py` **before** `pytest` the first time. It downloads the
 dataset from UCI (this can take a minute) and caches it in `data/`, so later
@@ -116,13 +127,17 @@ first they will simply do the download themselves. Use
 | `src/monitor/model.py` | Builds, trains, persists the model and records its metadata |
 | `src/monitor/evaluation.py` | Reusable metric functions, including per-group breakdowns — reused later to score monitoring batches |
 | `src/monitor/tuning.py` | Cross-validation, decision-threshold selection, hyperparameter check |
+| `src/monitor/prediction.py` | Loads the saved model and scores incoming batches; refuses batches containing labels |
+| `src/monitor/simulation.py` | Draws reproducible batches from the held-out data, with hooks for later drift experiments |
 | `explore_dataset.py` | Entry point: run the inspection and write the report |
 | `validate_and_preprocess.py` | Entry point: validate, fit the preprocessor on training data, save it |
 | `train_baseline.py` | Entry point: train the baseline, evaluate it, save model + metadata + metrics |
-| `tests/` | 124 tests across loading, exploration, validation, preprocessing, model, evaluation and tuning |
+| `simulate_batches.py` | Entry point: simulate incoming batches and score them |
+| `tests/` | 192 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction and simulation |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
 | `docs/baseline_model.md` | **Phase 3 deliverable** — results, every metric explained, and limitations |
+| `docs/prediction_and_batches.md` | **Phase 4 deliverable** — the five kinds of data, label separation, batch sampling |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -180,6 +195,39 @@ call, the preprocessor never sees the test set — there is no point at which
 preprocessing could be fitted on the full dataset before splitting. The
 threshold is likewise chosen from out-of-fold predictions within the training
 half only.
+
+## Scoring incoming batches
+
+See [`docs/prediction_and_batches.md`](docs/prediction_and_batches.md) for the
+full design, including what "training data", "reference data", "incoming
+batch", "prediction" and "actual label" each mean in this project.
+
+```python
+from monitor.data import load_adult_data
+from monitor.prediction import PredictionService
+from monitor.simulation import BatchSimulator, split_reference_and_holdout
+
+df = load_adult_data()
+reference, holdout = split_reference_and_holdout(df)
+
+service = PredictionService()                 # loads the saved model
+simulator = BatchSimulator(holdout, batch_size=500, seed=42)
+
+batch = simulator.next_batch()                # features + labels, kept apart
+result = service.predict_simulated(batch)     # only features are passed in
+record = result.to_frame()                    # features + predictions, for monitoring
+truth = batch.labels                          # available later, never used above
+```
+
+- **Batches come only from the held-out 20%** — the same split from Phase 3,
+  rebuilt with the same seed, so no row the model trained on can appear.
+- **Labels are structurally separated.** `predict_batch` *raises* if the frame
+  still contains the income column, because at real prediction time it would
+  not exist yet.
+- **Sampling is random, not stratified**, so batches vary naturally around the
+  24% rate instead of being pinned to it. Nothing is balanced.
+- **Batches are disjoint and reproducible** — the same seed replays the same
+  sequence, and each record arrives at most once.
 
 ---
 
