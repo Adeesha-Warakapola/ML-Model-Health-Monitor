@@ -6,6 +6,8 @@ instead of re-typing paths or column names, so a change only needs to happen onc
 
 from pathlib import Path
 
+from . import schema
+
 # Project root is two levels up from this file: src/monitor/config.py -> root
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,6 +21,19 @@ EXPLORATION_REPORT_PATH = DOCS_DIR / "dataset_exploration.md"
 # with the exact same preprocessor that was fitted on the training data.
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 PREPROCESSOR_PATH = ARTIFACTS_DIR / "preprocessor.joblib"
+
+# The baseline model artifact bundles preprocessing and the classifier, so
+# loading this one file is enough to make a prediction.
+BASELINE_MODEL_PATH = ARTIFACTS_DIR / "baseline_model.joblib"
+BASELINE_METADATA_PATH = ARTIFACTS_DIR / "baseline_model_metadata.json"
+
+# Evaluation results are committed, unlike the model binary, because they are
+# small, readable, and document what the baseline actually achieved.
+REPORTS_DIR = PROJECT_ROOT / "reports"
+BASELINE_METRICS_PATH = REPORTS_DIR / "baseline_metrics.json"
+
+# Fraction of the data held back for evaluation.
+TEST_SIZE = 0.2
 
 # The Adult / Census Income dataset is id=2 in the UCI ML Repository.
 UCI_DATASET_ID = 2
@@ -34,25 +49,10 @@ TARGET_COLUMN = "income"
 POSITIVE_LABEL = ">50K"
 TARGET_LABELS = ["<=50K", ">50K"]
 
-NUMERIC_FEATURES = [
-    "age",
-    "fnlwgt",
-    "education_num",
-    "capital_gain",
-    "capital_loss",
-    "hours_per_week",
-]
-
-CATEGORICAL_FEATURES = [
-    "workclass",
-    "education",
-    "marital_status",
-    "occupation",
-    "relationship",
-    "race",
-    "sex",
-    "native_country",
-]
-
-FEATURE_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+# Column names are defined once, in schema.py, which also carries the allowed
+# categories and value bounds. These are plain aliases so that older callers
+# keep working while there is only ever one definition to keep correct.
+NUMERIC_FEATURES = schema.NUMERIC_COLUMNS
+CATEGORICAL_FEATURES = schema.CATEGORICAL_COLUMNS
+FEATURE_COLUMNS = schema.FEATURE_COLUMNS
 ALL_COLUMNS = FEATURE_COLUMNS + [TARGET_COLUMN]

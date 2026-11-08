@@ -1,0 +1,279 @@
+{
+  "model_name": "logistic_regression",
+  "model_type": "LogisticRegression",
+  "trained_on": "2026-11-08",
+  "decision_threshold": 0.29,
+  "majority_class_accuracy": 0.7607,
+  "cross_validation": {
+    "n_splits": 5,
+    "summary": {
+      "accuracy": {
+        "mean": 0.8527,
+        "std": 0.0014
+      },
+      "precision": {
+        "mean": 0.7352,
+        "std": 0.0042
+      },
+      "recall": {
+        "mean": 0.6006,
+        "std": 0.0073
+      },
+      "f1_score": {
+        "mean": 0.6611,
+        "std": 0.0044
+      },
+      "roc_auc": {
+        "mean": 0.9067,
+        "std": 0.0013
+      }
+    },
+    "per_fold": [
+      {
+        "threshold": 0.5,
+        "accuracy": 0.8523352527191299,
+        "precision": 0.7300771208226221,
+        "recall": 0.6074866310160428,
+        "f1_score": 0.663164039696439,
+        "roc_auc": 0.9076062210188762,
+        "fold": 1
+      },
+      {
+        "threshold": 0.5,
+        "accuracy": 0.8523352527191299,
+        "precision": 0.7393048128342246,
+        "recall": 0.5914438502673797,
+        "f1_score": 0.6571598336304219,
+        "roc_auc": 0.9058639129633044,
+        "fold": 2
+      },
+      {
+        "threshold": 0.5,
+        "accuracy": 0.855278310940499,
+        "precision": 0.7407166123778501,
+        "recall": 0.6080213903743316,
+        "f1_score": 0.66784140969163,
+        "roc_auc": 0.908734162982419,
+        "fold": 3
+      },
+      {
+        "threshold": 0.5,
+        "accuracy": 0.8511645764013309,
+        "precision": 0.7340848806366048,
+        "recall": 0.5922953451043339,
+        "f1_score": 0.655611489487711,
+        "roc_auc": 0.9050366724401179,
+        "fold": 4
+      },
+      {
+        "threshold": 0.5,
+        "accuracy": 0.8521883798310724,
+        "precision": 0.7316915100453661,
+        "recall": 0.6037433155080214,
+        "f1_score": 0.6615880457075887,
+        "roc_auc": 0.9061951655738767,
+        "fold": 5
+      }
+    ]
+  },
+  "threshold_selection": {
+    "objective": "f1_score",
+    "min_precision": null,
+    "constraint_satisfied": true,
+    "selected_threshold": 0.29,
+    "selected_scores": {
+      "accuracy": 0.8277,
+      "precision": 0.6057,
+      "recall": 0.802,
+      "f1_score": 0.6901
+    },
+    "default_threshold_scores": {
+      "accuracy": 0.8527,
+      "precision": 0.7351,
+      "recall": 0.6006,
+      "f1_score": 0.6611
+    }
+  },
+  "hyperparameter_search": {
+    "searched": "classify__C",
+    "grid": [
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "results": [
+      {
+        "C": 0.01,
+        "mean_roc_auc": 0.9049,
+        "std_roc_auc": 0.0014
+      },
+      {
+        "C": 0.1,
+        "mean_roc_auc": 0.9067,
+        "std_roc_auc": 0.0013
+      },
+      {
+        "C": 1.0,
+        "mean_roc_auc": 0.9067,
+        "std_roc_auc": 0.0013
+      },
+      {
+        "C": 10.0,
+        "mean_roc_auc": 0.9066,
+        "std_roc_auc": 0.0013
+      }
+    ],
+    "best_C": 0.1,
+    "best_roc_auc": 0.9067,
+    "default_C_roc_auc": 0.9067,
+    "improvement_over_default": 0.0
+  },
+  "fairness": {
+    "sex": {
+      "groups": [
+        {
+          "group": "Female",
+          "n": 3289,
+          "actual_positive_rate": 0.1116,
+          "selection_rate": 0.1198,
+          "accuracy": 0.9115,
+          "precision": 0.5964,
+          "recall": 0.6403
+        },
+        {
+          "group": "Male",
+          "n": 6480,
+          "actual_positive_rate": 0.3042,
+          "selection_rate": 0.4113,
+          "accuracy": 0.7812,
+          "precision": 0.6038,
+          "recall": 0.8163
+        }
+      ],
+      "n_groups_compared": 2,
+      "min_group_size_for_ratios": 100,
+      "selection_rate_ratio": 0.2913,
+      "recall_ratio": 0.7844
+    },
+    "race": {
+      "groups": [
+        {
+          "group": "Amer-Indian-Eskimo",
+          "n": 104,
+          "actual_positive_rate": 0.0865,
+          "selection_rate": 0.1731,
+          "accuracy": 0.8558,
+          "precision": 0.3333,
+          "recall": 0.6667
+        },
+        {
+          "group": "Asian-Pac-Islander",
+          "n": 304,
+          "actual_positive_rate": 0.2566,
+          "selection_rate": 0.3684,
+          "accuracy": 0.7961,
+          "precision": 0.5714,
+          "recall": 0.8205
+        },
+        {
+          "group": "Black",
+          "n": 944,
+          "actual_positive_rate": 0.1282,
+          "selection_rate": 0.1282,
+          "accuracy": 0.8962,
+          "precision": 0.595,
+          "recall": 0.595
+        },
+        {
+          "group": "Other",
+          "n": 69,
+          "actual_positive_rate": 0.1594,
+          "selection_rate": 0.1594,
+          "accuracy": 0.8841,
+          "precision": 0.6364,
+          "recall": 0.6364
+        },
+        {
+          "group": "White",
+          "n": 8348,
+          "actual_positive_rate": 0.2538,
+          "selection_rate": 0.3351,
+          "accuracy": 0.8172,
+          "precision": 0.606,
+          "recall": 0.7999
+        }
+      ],
+      "n_groups_compared": 4,
+      "min_group_size_for_ratios": 100,
+      "selection_rate_ratio": 0.348,
+      "recall_ratio": 0.7252
+    }
+  },
+  "train": {
+    "n_samples": 39073,
+    "class_distribution": {
+      "<=50K": {
+        "count": 29724,
+        "percent": 76.07
+      },
+      ">50K": {
+        "count": 9349,
+        "percent": 23.93
+      }
+    },
+    "accuracy": 0.8279886366544673,
+    "precision": 0.606070390700678,
+    "recall": 0.8030805433736229,
+    "f1_score": 0.6908036987624787,
+    "roc_auc": 0.9083386314790621,
+    "confusion_matrix": [
+      [
+        24844,
+        4880
+      ],
+      [
+        1841,
+        7508
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "<=50K",
+      ">50K"
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n       <=50K       0.93      0.84      0.88     29724\n        >50K       0.61      0.80      0.69      9349\n\n    accuracy                           0.83     39073\n   macro avg       0.77      0.82      0.79     39073\nweighted avg       0.85      0.83      0.84     39073\n"
+  },
+  "test": {
+    "n_samples": 9769,
+    "class_distribution": {
+      "<=50K": {
+        "count": 7431,
+        "percent": 76.07
+      },
+      ">50K": {
+        "count": 2338,
+        "percent": 23.93
+      }
+    },
+    "accuracy": 0.8250588596581021,
+    "precision": 0.6028113762667539,
+    "recall": 0.7887082976903336,
+    "f1_score": 0.6833425977394849,
+    "roc_auc": 0.9058608085173445,
+    "confusion_matrix": [
+      [
+        6216,
+        1215
+      ],
+      [
+        494,
+        1844
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "<=50K",
+      ">50K"
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n       <=50K       0.93      0.84      0.88      7431\n        >50K       0.60      0.79      0.68      2338\n\n    accuracy                           0.83      9769\n   macro avg       0.76      0.81      0.78      9769\nweighted avg       0.85      0.83      0.83      9769\n"
+  }
+}

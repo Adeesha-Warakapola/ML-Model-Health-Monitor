@@ -59,6 +59,18 @@ def test_the_real_dataset_passes_validation():
     assert checks_in(result) == {"missing_values"}
 
 
+def test_config_and_schema_agree_on_the_feature_lists():
+    # config.py predates schema.py and still carries its own copies of these
+    # lists; data.py reads config while preprocessing reads schema. If the two
+    # ever diverge the pipeline would silently process different columns than
+    # the loader produces, so they are pinned together here.
+    from monitor import config
+
+    assert config.NUMERIC_FEATURES == schema.NUMERIC_COLUMNS
+    assert config.CATEGORICAL_FEATURES == schema.CATEGORICAL_COLUMNS
+    assert config.FEATURE_COLUMNS == schema.FEATURE_COLUMNS
+
+
 def test_schema_matches_the_real_dataset():
     # Verifies the hard-coded allowed_values against the actual data, so the
     # schema cannot silently drift away from what it claims to describe.
