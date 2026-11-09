@@ -34,6 +34,10 @@ including per-group behaviour by sex and race.
 
 ## Setup
 
+**Requires Python 3.10 or newer.** The code uses `float | None` style type
+hints, which earlier versions do not understand at runtime. Check with
+`python --version`.
+
 Create and activate a virtual environment, then install the dependencies.
 
 **Windows (PowerShell)**

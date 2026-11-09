@@ -1,10 +1,37 @@
-# Phase 1: project setup and dataset exploration.
-pandas
-numpy
-ucimlrepo
-tabulate
-pytest
+# Minimum versions, not exact pins.
+#
+# Each floor is the version that first provides an API this project actually
+# uses, so `pip install -r requirements.txt` either gives you a working
+# environment or fails immediately with a clear resolver message - rather
+# than installing something that breaks later with an ImportError.
+#
+# Upper bounds are deliberately not set: the real failure mode here is a
+# library that is too old, and capping versions would just create needless
+# conflicts for anyone installing this alongside other packages.
+#
+# Verified working with: pandas 3.0.6, numpy 2.4.6, scikit-learn 1.9.1,
+# joblib 1.6.0, tabulate 0.10.0, ucimlrepo 0.0.7, pytest 9.1.1 on Python 3.11.4.
 
-# Phase 2: validation and preprocessing.
-scikit-learn
-joblib
+# FixedThresholdClassifier (src/monitor/model.py) was added in scikit-learn
+# 1.5; OneHotEncoder's sparse_output argument needs 1.2.
+scikit-learn>=1.5
+
+# DataFrame.map (src/monitor/report.py) replaced applymap in pandas 2.1.
+pandas>=2.1
+
+# Baseline required by pandas 2.1; nothing version-specific is used directly.
+numpy>=1.23
+
+# Saving and loading the fitted pipeline.
+joblib>=1.2
+
+# Backs DataFrame.to_markdown, including the disable_numparse argument used
+# when writing the dataset exploration report.
+tabulate>=0.9
+
+# Downloads the Adult dataset via fetch_ucirepo(id=2).
+ucimlrepo>=0.0.7
+
+# The pythonpath ini option in pyproject.toml, which puts src/ on the import
+# path, requires pytest 7.
+pytest>=7.0
