@@ -18,6 +18,9 @@ adult/
 # Regenerate with `python validate_and_preprocess.py`.
 artifacts/
 
+# Monitoring history database - accumulates as the app runs, like a log file.
+monitoring/
+
 # OS / editor
 .DS_Store
 .vscode/

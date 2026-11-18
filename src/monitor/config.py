@@ -35,6 +35,12 @@ BASELINE_METRICS_PATH = REPORTS_DIR / "baseline_metrics.json"
 # Fraction of the data held back for evaluation.
 TEST_SIZE = 0.2
 
+# Monitoring history - runs, drift/performance results, and alerts - is
+# persisted here across restarts. Regenerated as the application runs, so it
+# is not committed, the same way artifacts/ and data/ are not.
+MONITORING_DIR = PROJECT_ROOT / "monitoring"
+MONITORING_DB_PATH = MONITORING_DIR / "monitoring_history.db"
+
 # The Adult / Census Income dataset is id=2 in the UCI ML Repository.
 UCI_DATASET_ID = 2
 UCI_DATASET_URL = "https://archive.ics.uci.edu/dataset/2/adult"

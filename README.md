@@ -9,7 +9,7 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 6 complete — prediction distribution and performance monitoring
+## Status: Phase 7 complete — alert management and monitoring history
 
 | Phase | Scope | State |
 | --- | --- | --- |
@@ -19,7 +19,8 @@ system and must not be used to make decisions about real people.
 | 4 | Prediction service and reproducible batch simulation | Done |
 | 5 | Numerical and categorical drift detection | Done |
 | 6 | Prediction-distribution monitoring and performance monitoring with delayed labels | Done |
-| 7+ | Alerting, monitoring history persistence, dashboard | Not started |
+| 7 | Alert generation, deduplication, and SQLite monitoring history | Done |
+| 8+ | Dashboard | Not started |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -85,6 +86,7 @@ python train_baseline.py
 python simulate_batches.py
 python detect_drift.py
 python monitor_performance.py
+python manage_alerts.py --fresh
 python -m pytest -q
 ```
 
@@ -97,7 +99,8 @@ python -m pytest -q
 | `python simulate_batches.py` | Batches are drawn from unseen data and scored | `Overlap 0 rows`, per-batch summaries, a variation table |
 | `python detect_drift.py` | Drift is detected in changed batches but not stable ones | Scenario 1 `STABLE`, scenarios 2–4 `DRIFT`, scenario 5 a quality failure |
 | `python monitor_performance.py` | Data drift, prediction drift and performance move independently | Stable scenario all-clear; shifted scenario shows drift + degraded accuracy with ROC-AUC unchanged |
-| `python -m pytest -q` | All code works | `309 passed` |
+| `python manage_alerts.py --fresh` | Alerts are generated, deduplicated, and survive a restart | 4 scenarios, then a reopened database showing 7 alert rows (not 17+) with correct occurrence counts |
+| `python -m pytest -q` | All code works | `367 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -129,6 +132,12 @@ Extra flags for `monitor_performance.py`:
 | --- | --- |
 | `--delayed-labels` | Show labels arriving in two separate waves instead of the drift scenarios |
 
+Extra flags for `manage_alerts.py`:
+
+| Flag | Effect |
+| --- | --- |
+| `--fresh` | Delete the existing `monitoring/monitoring_history.db` before running |
+
 Run `explore_dataset.py` **before** `pytest` the first time. It downloads the
 dataset from UCI (this can take a minute) and caches it in `data/`, so later
 runs — including the tests — are fast and work offline. If you run the tests
@@ -156,19 +165,24 @@ first they will simply do the download themselves. Use
 | `src/monitor/drift.py` | Compares batches against the fixed training distribution using KS, chi-square and PSI |
 | `src/monitor/prediction_monitoring.py` | Compares a batch's predicted labels and confidence against the model's reference predictions (reuses `drift.py`'s PSI machinery) |
 | `src/monitor/performance_monitoring.py` | Scores accuracy once true labels arrive, with stable record IDs so labels can arrive late and in parts |
+| `src/monitor/alerts.py` | Turns existing monitoring results into INFO/WARNING/CRITICAL alerts, in plain language |
+| `src/monitor/storage.py` | SQLite persistence for runs, drift/performance results, and deduplicated alerts, testable without a dashboard |
 | `explore_dataset.py` | Entry point: run the inspection and write the report |
 | `validate_and_preprocess.py` | Entry point: validate, fit the preprocessor on training data, save it |
 | `train_baseline.py` | Entry point: train the baseline, evaluate it, save model + metadata + metrics |
 | `simulate_batches.py` | Entry point: simulate incoming batches and score them |
 | `detect_drift.py` | Entry point: compare stable and deliberately drifted batches against the reference |
 | `monitor_performance.py` | Entry point: prediction and performance monitoring, including delayed/partial labels |
-| `tests/` | 309 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring and performance monitoring |
+| `manage_alerts.py` | Entry point: generate alerts across normal/moderate/severe batches, persist to SQLite, then read it back as if the app had restarted |
+| `tests/` | 367 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring, performance monitoring, alerts and storage |
+| `monitoring/` | SQLite monitoring history database (git-ignored, regenerated on demand) |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
 | `docs/baseline_model.md` | **Phase 3 deliverable** — results, every metric explained, and limitations |
 | `docs/prediction_and_batches.md` | **Phase 4 deliverable** — the five kinds of data, label separation, batch sampling |
 | `docs/drift_detection.md` | **Phase 5 deliverable** — the statistical methods, every threshold's provenance, and two bugs found by measurement |
 | `docs/performance_monitoring.md` | **Phase 6 deliverable** — data drift vs. prediction drift vs. performance degradation, measured as three different numbers on the same batch |
+| `docs/alert_management.md` | **Phase 7 deliverable** — severity rules, the deduplication bug found by testing and fixed, database structure |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -338,6 +352,49 @@ report = performance_monitor.compute_performance(
 - A labelled sample below the measured floor (`min_labeled_sample=300`,
   chosen from how recall's sampling noise behaves on this dataset) is still
   computed and returned, flagged rather than hidden.
+
+## Alerts and monitoring history
+
+See [`docs/alert_management.md`](docs/alert_management.md) for the full
+design, the database structure, and a deduplication bug that was found and
+fixed during testing.
+
+```python
+from monitor.alerts import generate_alerts
+from monitor.storage import MonitoringRepository, make_run_id
+
+repository = MonitoringRepository()           # monitoring/monitoring_history.db
+run_id = make_run_id()
+repository.save_run(run_id, batch.batch_id, started_at=...)
+
+alerts = generate_alerts(
+    batch_id=batch.batch_id, validation=prediction.validation,
+    drift=drift_report, prediction_drift=prediction_report,
+    performance=performance_report,
+)
+repository.save_alerts(alerts, run_id)        # each "created" or "deduplicated"
+
+# Later, in a new process - a restart, a dashboard:
+MonitoringRepository().get_alerts(severity="CRITICAL")
+```
+
+- **Three severities** (INFO, WARNING, CRITICAL), with the rule for which
+  maps to which kept separate (`AlertRules`) from the statistical thresholds
+  that produced the underlying verdict.
+- **No labels never produces a performance alert** — `status="no_labels"`
+  returns `[]`, not a guess. A degraded metric from an insufficient labelled
+  sample still alerts, but capped a severity level below a confirmed result
+  and its description says plainly that it is unconfirmed.
+- **Repeated identical alerts update one row instead of creating new ones.**
+  Measured on this dataset's own persistent ~2-6% missingness in three
+  columns: four monitoring cycles produced three alert rows with
+  `occurrence_count` 4-5, not twelve separate rows. The dedup key excludes
+  severity on purpose, so a problem that escalates from WARNING to CRITICAL
+  updates the existing row rather than starting a new, unrelated-looking one
+  — a bug in an earlier version, caught by a test, now fixed.
+- **Storage is independent of any dashboard**: every `tests/test_storage.py`
+  test builds a throwaway database and hand-constructed report objects, with
+  no model, dataset, or live service involved.
 
 ---
 
