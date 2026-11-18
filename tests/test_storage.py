@@ -110,6 +110,51 @@ def test_all_tables_exist_after_initialization(repo):
     } <= tables
 
 
+def test_opening_a_pre_existing_database_without_the_newer_columns_adds_them(tmp_path):
+    """A database created before notes_json/metrics_json existed must still open.
+
+    Simulates upgrading: a hand-built database using the *original* Phase 7
+    schema (no notes_json, no metrics_json, no batch_*_json columns) must be
+    usable by the current code without deleting any data, rather than
+    failing the first time a dashboard page tries to read a new column.
+    """
+    db_path = tmp_path / "old_schema.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE monitoring_runs (run_id TEXT PRIMARY KEY, batch_id TEXT, "
+            "started_at TEXT, completed_at TEXT, status TEXT, notes TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE drift_results (id INTEGER PRIMARY KEY, run_id TEXT, "
+            "batch_id TEXT, feature TEXT, feature_type TEXT, method TEXT, "
+            "status TEXT, psi REAL, statistic REAL, p_value REAL, "
+            "effect_size REAL, n_reference INTEGER, n_batch INTEGER, recorded_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE prediction_drift_results (id INTEGER PRIMARY KEY, "
+            "run_id TEXT, batch_id TEXT, label_status TEXT, label_psi REAL, "
+            "confidence_status TEXT, confidence_psi REAL, recorded_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE performance_metrics (id INTEGER PRIMARY KEY, run_id TEXT, "
+            "batch_id TEXT, status TEXT, n_total INTEGER, n_labeled INTEGER, "
+            "accuracy REAL, precision_score REAL, recall REAL, f1_score REAL, "
+            "roc_auc REAL, comparison_json TEXT, recorded_at TEXT)"
+        )
+
+    repo = MonitoringRepository(db_path)  # must not raise
+
+    run_id = make_run_id()
+    repo.save_run(run_id, "batch_1", "now")
+    repo.save_drift_report(run_id, make_drift_report("batch_1"))
+    repo.save_prediction_drift_report(run_id, make_prediction_drift_report("batch_1"))
+    repo.save_performance_report(run_id, make_performance_report("batch_1"))
+
+    assert len(repo.get_drift_results(batch_id="batch_1")) == 2
+    assert len(repo.get_prediction_drift_results(batch_id="batch_1")) == 1
+    assert len(repo.get_performance_metrics(batch_id="batch_1")) == 1
+
+
 # --- runs ----------------------------------------------------------------------
 
 
@@ -212,6 +257,47 @@ def test_save_and_retrieve_performance_metrics(repo):
     assert len(results) == 1
     assert results.iloc[0]["accuracy"] == pytest.approx(0.8)
     assert results.iloc[0]["status"] == COMPUTED
+
+
+def test_get_prediction_drift_results_returns_saved_rows(repo):
+    run_id = make_run_id()
+    repo.save_run(run_id, "batch_1", "now")
+    repo.save_prediction_drift_report(run_id, make_prediction_drift_report("batch_1"))
+
+    results = repo.get_prediction_drift_results(batch_id="batch_1")
+    assert len(results) == 1
+    assert results.iloc[0]["label_status"] == STABLE
+
+
+def test_get_prediction_drift_results_with_no_matching_batch_is_empty(repo):
+    assert repo.get_prediction_drift_results(batch_id="nonexistent").empty
+
+
+def test_performance_metrics_json_round_trips_the_full_metrics_dict(repo):
+    import json
+
+    run_id = make_run_id()
+    repo.save_run(run_id, "batch_1", "now")
+    repo.save_performance_report(run_id, make_performance_report("batch_1"))
+
+    results = repo.get_performance_metrics(batch_id="batch_1")
+    saved_metrics = json.loads(results.iloc[0]["metrics_json"])
+    assert saved_metrics["accuracy"] == pytest.approx(0.8)
+    assert saved_metrics["f1_score"] == pytest.approx(0.65)
+
+
+def test_drift_results_notes_json_round_trips_feature_notes(repo):
+    import json
+
+    report = make_drift_report("batch_1")
+    report.feature_results[0].notes.append("SMALL SAMPLE: just a test note")
+    run_id = make_run_id()
+    repo.save_run(run_id, "batch_1", "now")
+    repo.save_drift_report(run_id, report)
+
+    results = repo.get_drift_results(batch_id="batch_1", feature="age")
+    notes = json.loads(results.iloc[0]["notes_json"])
+    assert notes == ["SMALL SAMPLE: just a test note"]
 
 
 def test_batch_summary_is_saved_and_retrievable(repo):

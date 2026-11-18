@@ -8,13 +8,14 @@ database file and no model or dataset at all, and the monitoring logic stays
 usable by something other than this storage layer (a notebook, a different
 database, a dashboard) without being tangled up with SQL.
 
-Five tables, one SQLite file:
+Six tables, one SQLite file:
 
-    monitoring_runs        one row per time the monitoring pipeline ran
-    batch_summaries        one row per batch: size, label coverage, rates
-    drift_results          one row per feature per run (from DriftReport)
-    performance_metrics    one row per run (from PerformanceReport)
-    alerts                 one row per *distinct* problem (see below)
+    monitoring_runs           one row per time the monitoring pipeline ran
+    batch_summaries           one row per batch: size, label coverage, rates
+    drift_results             one row per feature per run (from DriftReport)
+    prediction_drift_results  one row per run (from PredictionDriftReport)
+    performance_metrics       one row per run (from PerformanceReport)
+    alerts                    one row per *distinct* problem (see below)
 
 Every table carries its own stable identifier and a timestamp, set once at
 creation. The `alerts` table is the one table where identity is deliberately
@@ -111,19 +112,23 @@ CREATE TABLE IF NOT EXISTS drift_results (
     effect_size   REAL,
     n_reference   INTEGER,
     n_batch       INTEGER,
+    notes_json    TEXT,
     recorded_at   TEXT NOT NULL,
     UNIQUE(run_id, feature)
 );
 
 CREATE TABLE IF NOT EXISTS prediction_drift_results (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id             TEXT NOT NULL REFERENCES monitoring_runs(run_id),
-    batch_id           TEXT NOT NULL,
-    label_status       TEXT NOT NULL,
-    label_psi          REAL,
-    confidence_status  TEXT,
-    confidence_psi      REAL,
-    recorded_at        TEXT NOT NULL,
+    id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                        TEXT NOT NULL REFERENCES monitoring_runs(run_id),
+    batch_id                      TEXT NOT NULL,
+    label_status                  TEXT NOT NULL,
+    label_psi                     REAL,
+    confidence_status             TEXT,
+    confidence_psi                REAL,
+    batch_label_distribution_json TEXT,
+    batch_confidence_json         TEXT,
+    notes_json                    TEXT,
+    recorded_at                   TEXT NOT NULL,
     UNIQUE(run_id)
 );
 
@@ -140,6 +145,7 @@ CREATE TABLE IF NOT EXISTS performance_metrics (
     f1_score         REAL,
     roc_auc          REAL,
     comparison_json  TEXT,
+    metrics_json     TEXT,
     recorded_at      TEXT NOT NULL,
     UNIQUE(run_id)
 );
@@ -170,6 +176,28 @@ CREATE INDEX IF NOT EXISTS idx_drift_batch ON drift_results(batch_id);
 CREATE INDEX IF NOT EXISTS idx_perf_batch ON performance_metrics(batch_id);
 """
 
+# Columns added after the tables above were first created. A fresh database
+# gets them directly from _SCHEMA; this list exists only so a monitoring.db
+# file created by an earlier version of this module still works, instead of
+# failing with "no such column" the first time a dashboard page queries it.
+_ADDED_COLUMNS = {
+    "drift_results": [("notes_json", "TEXT")],
+    "prediction_drift_results": [
+        ("batch_label_distribution_json", "TEXT"),
+        ("batch_confidence_json", "TEXT"),
+        ("notes_json", "TEXT"),
+    ],
+    "performance_metrics": [("metrics_json", "TEXT")],
+}
+
+
+def _ensure_added_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _ADDED_COLUMNS.items():
+        present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, column_type in columns:
+            if name not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+
 
 class MonitoringRepository:
     """Saves and retrieves monitoring history for one SQLite database file."""
@@ -185,6 +213,7 @@ class MonitoringRepository:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
                 conn.executescript(_SCHEMA)
+                _ensure_added_columns(conn)
         except sqlite3.Error as error:
             raise MonitoringStorageError(
                 f"Could not initialise the monitoring database at "
@@ -270,7 +299,7 @@ class MonitoringRepository:
             (
                 run_id, report.batch_id, r.feature, r.feature_type, r.method,
                 r.status, r.psi, r.statistic, r.p_value, r.effect_size,
-                r.n_reference, r.n_batch, now,
+                r.n_reference, r.n_batch, json.dumps(r.notes) if r.notes else None, now,
             )
             for r in report.feature_results
         ]
@@ -279,8 +308,8 @@ class MonitoringRepository:
                 conn.executemany(
                     "INSERT OR REPLACE INTO drift_results "
                     "(run_id, batch_id, feature, feature_type, method, status, psi, "
-                    " statistic, p_value, effect_size, n_reference, n_batch, recorded_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " statistic, p_value, effect_size, n_reference, n_batch, notes_json, "
+                    " recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     rows,
                 )
         except sqlite3.Error as error:
@@ -296,10 +325,16 @@ class MonitoringRepository:
                 conn.execute(
                     "INSERT OR REPLACE INTO prediction_drift_results "
                     "(run_id, batch_id, label_status, label_psi, confidence_status, "
-                    " confidence_psi, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    " confidence_psi, batch_label_distribution_json, "
+                    " batch_confidence_json, notes_json, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id, report.batch_id, report.label_status, report.label_psi,
-                        report.confidence_status, report.confidence_psi, _utc_now(),
+                        report.confidence_status, report.confidence_psi,
+                        json.dumps(report.batch_distribution),
+                        json.dumps(report.batch_confidence),
+                        json.dumps(report.notes) if report.notes else None,
+                        _utc_now(),
                     ),
                 )
         except sqlite3.Error as error:
@@ -312,18 +347,19 @@ class MonitoringRepository:
     def save_performance_report(self, run_id: str, report: PerformanceReport) -> None:
         metrics = report.metrics or {}
         comparison_json = json.dumps(report.comparison) if report.comparison else None
+        metrics_json = json.dumps(metrics) if metrics else None
         try:
             with self._connect() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO performance_metrics "
                     "(run_id, batch_id, status, n_total, n_labeled, accuracy, "
                     " precision_score, recall, f1_score, roc_auc, comparison_json, "
-                    " recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " metrics_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id, report.batch_id, report.status, report.n_total,
                         report.n_labeled, metrics.get("accuracy"), metrics.get("precision"),
                         metrics.get("recall"), metrics.get("f1_score"), metrics.get("roc_auc"),
-                        comparison_json, _utc_now(),
+                        comparison_json, metrics_json, _utc_now(),
                     ),
                 )
         except sqlite3.Error as error:
@@ -427,6 +463,15 @@ class MonitoringRepository:
         if feature:
             query += " AND feature = ?"
             params.append(feature)
+        query += " ORDER BY recorded_at DESC"
+        return self._query(query, params)
+
+    def get_prediction_drift_results(self, batch_id: str | None = None) -> pd.DataFrame:
+        query = "SELECT * FROM prediction_drift_results WHERE 1=1"
+        params: list = []
+        if batch_id:
+            query += " AND batch_id = ?"
+            params.append(batch_id)
         query += " ORDER BY recorded_at DESC"
         return self._query(query, params)
 

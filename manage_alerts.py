@@ -18,77 +18,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from monitor import config
-from monitor.alerts import generate_alerts
-from monitor.data import load_adult_data
-from monitor.drift import DriftDetector
-from monitor.performance_monitoring import PerformanceMonitor, load_baseline_test_metrics
-from monitor.prediction import PredictionService, utc_now
-from monitor.prediction_monitoring import PredictionMonitor
-from monitor.simulation import (
-    BatchSimulator,
-    get_reference_features,
-    overwrite_category,
-    shift_numeric,
-    split_reference_and_holdout,
-)
-from monitor.storage import MonitoringRepository, make_run_id
+from monitor.monitoring_cycle import build_monitoring_context, run_monitoring_cycle
+from monitor.simulation import overwrite_category, shift_numeric
+from monitor.storage import MonitoringRepository
 
 SEPARATOR = "=" * 72
-
-
-def run_monitoring_cycle(
-    batch,
-    service: PredictionService,
-    drift_detector: DriftDetector,
-    prediction_monitor: PredictionMonitor,
-    baseline: dict,
-    repository: MonitoringRepository,
-) -> dict:
-    """One full cycle: predict, check drift, check performance, alert, persist.
-
-    Every piece of monitoring logic is called exactly once here and nowhere
-    recomputed - this function's job is sequencing and persistence, not
-    calculation.
-    """
-    run_id = make_run_id()
-    repository.save_run(run_id, batch.batch_id, started_at=utc_now())
-
-    prediction = service.predict_simulated(batch)
-    drift_report = drift_detector.detect(batch.features, batch_id=batch.batch_id)
-    prediction_report = prediction_monitor.evaluate(prediction)
-
-    performance_monitor = PerformanceMonitor(min_labeled_sample=300)
-    performance_monitor.register_batch(prediction)
-    performance_monitor.submit_labels(batch.batch_id, batch.labels)
-    performance_report = performance_monitor.compute_performance(
-        batch.batch_id, baseline=baseline
-    )
-
-    alerts = generate_alerts(
-        batch_id=batch.batch_id,
-        validation=prediction.validation,
-        drift=drift_report,
-        prediction_drift=prediction_report,
-        performance=performance_report,
-    )
-
-    actual_positive_rate = (batch.labels == config.POSITIVE_LABEL).mean()
-    repository.save_batch_summary(
-        run_id, prediction, actual_positive_rate=actual_positive_rate,
-        n_labeled=len(batch.labels),
-    )
-    repository.save_drift_report(run_id, drift_report)
-    repository.save_prediction_drift_report(run_id, prediction_report)
-    repository.save_performance_report(run_id, performance_report)
-    outcomes = repository.save_alerts(alerts, run_id)
-    repository.complete_run(run_id)
-
-    return {
-        "run_id": run_id, "batch_id": batch.batch_id, "alerts": alerts,
-        "outcomes": outcomes, "drift_status": drift_report.status,
-        "prediction_status": prediction_report.status,
-        "performance_status": performance_report.status,
-    }
 
 
 def describe_cycle(title: str, result: dict) -> None:
@@ -119,37 +53,20 @@ def main() -> None:
         config.MONITORING_DB_PATH.unlink()
         print(f"Deleted {config.MONITORING_DB_PATH}\n")
 
-    df = load_adult_data()
-    reference_features = get_reference_features(df)
-    _, holdout = split_reference_and_holdout(df)
-
-    service = PredictionService()
-    drift_detector = DriftDetector(reference_features)
-    prediction_monitor = PredictionMonitor.from_reference_features(service, reference_features)
-    baseline = load_baseline_test_metrics()
-
-    repository = MonitoringRepository(config.MONITORING_DB_PATH)
+    context = build_monitoring_context(batch_size=600)
     print(f"Monitoring database: {config.MONITORING_DB_PATH}\n")
-
-    simulator = BatchSimulator(holdout, batch_size=600, seed=config.RANDOM_SEED)
 
     # Scenario 1: stable batch. Expect only the dataset's known, recurring
     # missing-value warnings (Phase 1/2 found workclass/occupation/
     # native_country run ~2-6% missing) - nothing data-drift, prediction-
     # drift, or performance related.
-    result1 = run_monitoring_cycle(
-        simulator.next_batch(), service, drift_detector, prediction_monitor,
-        baseline, repository,
-    )
+    result1 = run_monitoring_cycle(context.simulator.next_batch(), context)
     describe_cycle("SCENARIO 1 - normal batch (expect WARNING at most)", result1)
 
     # Scenario 2: the same kind of batch again. The three recurring
     # data-quality warnings must deduplicate into the same three alert rows
     # with a higher occurrence_count, not create three new ones.
-    result2 = run_monitoring_cycle(
-        simulator.next_batch(), service, drift_detector, prediction_monitor,
-        baseline, repository,
-    )
+    result2 = run_monitoring_cycle(context.simulator.next_batch(), context)
     describe_cycle(
         "SCENARIO 2 - another normal batch (watch occurrence counts go up, not rows)",
         result2,
@@ -159,29 +76,25 @@ def main() -> None:
     # Measured directly (see docs/alert_management.md): 5% gives PSI 0.1587,
     # which lands in the moderate band (0.10-0.25) and so should alert at
     # WARNING, not CRITICAL. A larger fraction (8%+) crosses into drift.
-    simulator.reset()
-    warning_batch = simulator.next_batch(
+    context.simulator.reset()
+    warning_batch = context.simulator.next_batch(
         modifier=overwrite_category("occupation", "Gig-economy", fraction=0.05)
     )
-    result3 = run_monitoring_cycle(
-        warning_batch, service, drift_detector, prediction_monitor, baseline, repository,
-    )
+    result3 = run_monitoring_cycle(warning_batch, context)
     describe_cycle("SCENARIO 3 - moderate problem (expect WARNING)", result3)
 
     # Scenario 4: a severe, deliberate shift. Expect CRITICAL alerts for
     # data drift and for confirmed performance degradation.
-    simulator.reset()
-    critical_batch = simulator.next_batch(modifier=shift_numeric("age", 25))
-    result4 = run_monitoring_cycle(
-        critical_batch, service, drift_detector, prediction_monitor, baseline, repository,
-    )
+    context.simulator.reset()
+    critical_batch = context.simulator.next_batch(modifier=shift_numeric("age", 25))
+    result4 = run_monitoring_cycle(critical_batch, context)
     describe_cycle("SCENARIO 4 - severe problem (expect CRITICAL)", result4)
 
     # --- Simulated restart -------------------------------------------------
     print(SEPARATOR)
     print("SIMULATED RESTART - new MonitoringRepository instance, same file")
     print(SEPARATOR)
-    del repository
+    del context
     reopened = MonitoringRepository(config.MONITORING_DB_PATH)
 
     runs = reopened.get_runs()

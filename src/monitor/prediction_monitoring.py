@@ -386,3 +386,16 @@ class PredictionMonitor:
             label: {"count": int(count), "percent": round(float(count) / total * 100, 2)}
             for label, count in counts.items()
         }
+
+    def reference_label_distribution(self) -> dict:
+        """Public read-only access to the reference predicted-label mix.
+
+        Exposed so a caller (such as the dashboard) can draw a reference-vs-
+        batch comparison without reaching into a private attribute - this is
+        the same dictionary `evaluate()` already uses, not a new calculation.
+        """
+        return self._reference_distribution()
+
+    def reference_confidence_summary(self) -> dict:
+        """Public read-only access to the reference confidence summary."""
+        return self._reference_confidence

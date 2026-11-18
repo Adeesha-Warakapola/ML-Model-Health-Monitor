@@ -9,7 +9,7 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 7 complete — alert management and monitoring history
+## Status: Phase 8 complete — interactive dashboard
 
 | Phase | Scope | State |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ system and must not be used to make decisions about real people.
 | 5 | Numerical and categorical drift detection | Done |
 | 6 | Prediction-distribution monitoring and performance monitoring with delayed labels | Done |
 | 7 | Alert generation, deduplication, and SQLite monitoring history | Done |
-| 8+ | Dashboard | Not started |
+| 8 | Interactive Streamlit + Plotly dashboard over Phases 1-7 | Done |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -100,7 +100,8 @@ python -m pytest -q
 | `python detect_drift.py` | Drift is detected in changed batches but not stable ones | Scenario 1 `STABLE`, scenarios 2–4 `DRIFT`, scenario 5 a quality failure |
 | `python monitor_performance.py` | Data drift, prediction drift and performance move independently | Stable scenario all-clear; shifted scenario shows drift + degraded accuracy with ROC-AUC unchanged |
 | `python manage_alerts.py --fresh` | Alerts are generated, deduplicated, and survive a restart | 4 scenarios, then a reopened database showing 7 alert rows (not 17+) with correct occurrence counts |
-| `python -m pytest -q` | All code works | `367 passed` |
+| `streamlit run app.py` | The dashboard starts and reads the same monitoring database | Opens at `http://localhost:8501`; the Overview page shows the latest batch without training or retraining anything |
+| `python -m pytest -q` | All code works | `407 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -138,6 +139,9 @@ Extra flags for `manage_alerts.py`:
 | --- | --- |
 | `--fresh` | Delete the existing `monitoring/monitoring_history.db` before running |
 
+The dashboard (`streamlit run app.py`) takes no flags; batch size and
+demonstration scenario are chosen from its sidebar at runtime instead.
+
 Run `explore_dataset.py` **before** `pytest` the first time. It downloads the
 dataset from UCI (this can take a minute) and caches it in `data/`, so later
 runs — including the tests — are fast and work offline. If you run the tests
@@ -167,6 +171,8 @@ first they will simply do the download themselves. Use
 | `src/monitor/performance_monitoring.py` | Scores accuracy once true labels arrive, with stable record IDs so labels can arrive late and in parts |
 | `src/monitor/alerts.py` | Turns existing monitoring results into INFO/WARNING/CRITICAL alerts, in plain language |
 | `src/monitor/storage.py` | SQLite persistence for runs, drift/performance results, and deduplicated alerts, testable without a dashboard |
+| `src/monitor/monitoring_cycle.py` | The one predict→drift→performance→alert→persist cycle, shared by `manage_alerts.py` and the dashboard |
+| `src/monitor/dashboard_data.py` | Pure (no Streamlit) helpers behind every dashboard page — scenarios, status colours/labels, formatting, empty-state text |
 | `explore_dataset.py` | Entry point: run the inspection and write the report |
 | `validate_and_preprocess.py` | Entry point: validate, fit the preprocessor on training data, save it |
 | `train_baseline.py` | Entry point: train the baseline, evaluate it, save model + metadata + metrics |
@@ -174,7 +180,11 @@ first they will simply do the download themselves. Use
 | `detect_drift.py` | Entry point: compare stable and deliberately drifted batches against the reference |
 | `monitor_performance.py` | Entry point: prediction and performance monitoring, including delayed/partial labels |
 | `manage_alerts.py` | Entry point: generate alerts across normal/moderate/severe batches, persist to SQLite, then read it back as if the app had restarted |
-| `tests/` | 367 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring, performance monitoring, alerts and storage |
+| `app.py` | Dashboard entry point (`streamlit run app.py`) — the Overview page |
+| `pages/` | The other six dashboard pages: Data Quality, Data Drift, Prediction Monitoring, Model Performance, Alerts, Monitoring History |
+| `dashboard_common.py` | Streamlit/Plotly glue shared by every page — cached monitoring context, sidebar controls, theme CSS |
+| `.streamlit/config.toml` | The dashboard's dark theme |
+| `tests/` | 407 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring, performance monitoring, alerts, storage, the monitoring cycle, and dashboard helpers |
 | `monitoring/` | SQLite monitoring history database (git-ignored, regenerated on demand) |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
@@ -183,6 +193,7 @@ first they will simply do the download themselves. Use
 | `docs/drift_detection.md` | **Phase 5 deliverable** — the statistical methods, every threshold's provenance, and two bugs found by measurement |
 | `docs/performance_monitoring.md` | **Phase 6 deliverable** — data drift vs. prediction drift vs. performance degradation, measured as three different numbers on the same batch |
 | `docs/alert_management.md` | **Phase 7 deliverable** — severity rules, the deduplication bug found by testing and fixed, database structure |
+| `docs/dashboard.md` | **Phase 8 deliverable** — dashboard architecture, which pages are restart-safe and why, verification via `AppTest` |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -395,6 +406,43 @@ MonitoringRepository().get_alerts(severity="CRITICAL")
 - **Storage is independent of any dashboard**: every `tests/test_storage.py`
   test builds a throwaway database and hand-constructed report objects, with
   no model, dataset, or live service involved.
+
+## Dashboard
+
+See [`docs/dashboard.md`](docs/dashboard.md) for the full architecture,
+which pages survive a restart and why, and how every page was verified.
+
+```
+streamlit run app.py
+```
+
+Seven pages — Overview, Data Quality, Data Drift, Prediction Monitoring,
+Model Performance, Alerts, Monitoring History — all reading from the same
+`MonitoringRepository` and the same `monitor.monitoring_cycle.run_monitoring_cycle`
+the CLI script (`manage_alerts.py`) uses, so the dashboard can never run the
+monitoring pipeline differently than the command line does.
+
+- **The sidebar is the only place a batch is simulated.** It offers three
+  measured scenarios (stable, moderate drift, severe drift — the same
+  modifiers `manage_alerts.py` uses) and a batch-size slider, then calls the
+  existing pipeline exactly once and saves every result.
+- **Almost every page works the same after a restart.** `drift_results`,
+  `prediction_drift_results` and `performance_metrics` now persist a
+  `notes_json`/`metrics_json`/distribution JSON alongside the numbers Phase 7
+  needed for alerting, so the confusion matrix, per-feature notes, and
+  prediction-mix breakdowns are all restart-safe, not only the alerts. A
+  schema-migration step (`storage._ensure_added_columns`) adds these columns
+  to a database created by an earlier version without losing any row.
+- **Only raw per-row values are session-only** — a reference-vs-batch value
+  histogram and the full confidence histogram need the actual batch, which
+  is not persisted (only its summary statistics are), so they only appear
+  for the batch most recently run in the current dashboard session.
+  Everywhere this applies, the page says so explicitly rather than silently
+  omitting the chart.
+- **Verified with `streamlit.testing.v1.AppTest`**, not just by eye: every
+  page runs with zero exceptions against both a populated and an empty
+  database, and the "run a new batch"/"reset simulator" sidebar buttons were
+  exercised under all three scenarios.
 
 ---
 

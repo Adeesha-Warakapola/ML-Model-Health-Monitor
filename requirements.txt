@@ -46,3 +46,12 @@ ucimlrepo>=0.0.7
 # The pythonpath ini option in pyproject.toml, which puts src/ on the import
 # path, requires pytest 7.
 pytest>=7.0
+
+# Phase 8 dashboard (app.py, pages/, dashboard_common.py). st.cache_resource
+# (used to build the monitoring context once per process) needs Streamlit 1.18+;
+# pinned higher here because that is what this project was built and verified
+# against.
+streamlit>=1.38
+
+# Interactive charts on every dashboard page.
+plotly>=5.24
