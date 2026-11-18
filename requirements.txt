@@ -9,8 +9,14 @@
 # library that is too old, and capping versions would just create needless
 # conflicts for anyone installing this alongside other packages.
 #
-# Verified working with: pandas 3.0.6, numpy 2.4.6, scikit-learn 1.9.1,
-# joblib 1.6.0, tabulate 0.10.0, ucimlrepo 0.0.7, pytest 9.1.1 on Python 3.11.4.
+# Verified working with: pandas 3.0.6, numpy 2.4.6, scipy 1.17.1,
+# scikit-learn 1.9.1, joblib 1.6.0, tabulate 0.10.0, ucimlrepo 0.0.7,
+# pytest 9.1.1 on Python 3.11.4.
+#
+# Evidently is deliberately NOT a dependency. See the module docstring in
+# src/monitor/drift.py: the three methods needed here are a few dozen lines on
+# top of scipy, and a library would hide the thresholds this project should be
+# explicit about.
 
 # FixedThresholdClassifier (src/monitor/model.py) was added in scikit-learn
 # 1.5; OneHotEncoder's sparse_output argument needs 1.2.
@@ -21,6 +27,11 @@ pandas>=2.1
 
 # Baseline required by pandas 2.1; nothing version-specific is used directly.
 numpy>=1.23
+
+# ks_2samp and chi2_contingency for drift detection (src/monitor/drift.py).
+# scikit-learn already pulls scipy in, but drift.py imports it directly, so it
+# is declared here rather than relied on as somebody else's dependency.
+scipy>=1.10
 
 # Saving and loading the fitted pipeline.
 joblib>=1.2

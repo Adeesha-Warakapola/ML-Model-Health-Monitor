@@ -9,7 +9,7 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 4 complete — prediction engine and batch simulation
+## Status: Phase 5 complete — data drift detection
 
 | Phase | Scope | State |
 | --- | --- | --- |
@@ -17,7 +17,8 @@ system and must not be used to make decisions about real people.
 | 2 | Schema, batch validation, preprocessing pipeline | Done |
 | 3 | Baseline model training and evaluation | Done |
 | 4 | Prediction service and reproducible batch simulation | Done |
-| 5+ | Drift detection, monitoring history, alerts, dashboard | Not started |
+| 5 | Numerical and categorical drift detection | Done |
+| 6+ | Performance monitoring, alert history, dashboard | Not started |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -81,6 +82,7 @@ python explore_dataset.py
 python validate_and_preprocess.py
 python train_baseline.py
 python simulate_batches.py
+python detect_drift.py
 python -m pytest -q
 ```
 
@@ -91,7 +93,8 @@ python -m pytest -q
 | `python validate_and_preprocess.py` | Validation and preprocessing work end to end | Validation summaries, then `Fitted preprocessor saved to .../artifacts/preprocessor.joblib` |
 | `python train_baseline.py` | The baseline trains, scores and saves | Metrics tables, then three `saved to` lines |
 | `python simulate_batches.py` | Batches are drawn from unseen data and scored | `Overlap 0 rows`, per-batch summaries, a variation table |
-| `python -m pytest -q` | All code works | `192 passed` |
+| `python detect_drift.py` | Drift is detected in changed batches but not stable ones | Scenario 1 `STABLE`, scenarios 2–4 `DRIFT`, scenario 5 a quality failure |
+| `python -m pytest -q` | All code works | `254 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -107,7 +110,15 @@ Extra flags for `simulate_batches.py`:
 | --- | --- |
 | `--batches N --size N` | How many batches, and how many rows each |
 | `--seed N` | Change the sampling seed |
-| `--demo-modifier` | Show the controlled-change hook Phase 5 will use |
+| `--demo-modifier` | Show the controlled-change hook drift detection uses |
+
+Extra flags for `detect_drift.py`:
+
+| Flag | Effect |
+| --- | --- |
+| `--size N` | Rows per batch (default 500) |
+| `--small-sample-demo` | Measured false-alarm rates at small batch sizes |
+| `--json` | Print one report as JSON and exit |
 
 Run `explore_dataset.py` **before** `pytest` the first time. It downloads the
 dataset from UCI (this can take a minute) and caches it in `data/`, so later
@@ -132,16 +143,19 @@ first they will simply do the download themselves. Use
 | `src/monitor/evaluation.py` | Reusable metric functions, including per-group breakdowns — reused later to score monitoring batches |
 | `src/monitor/tuning.py` | Cross-validation, decision-threshold selection, hyperparameter check |
 | `src/monitor/prediction.py` | Loads the saved model and scores incoming batches; refuses batches containing labels |
-| `src/monitor/simulation.py` | Draws reproducible batches from the held-out data, with hooks for later drift experiments |
+| `src/monitor/simulation.py` | Draws reproducible batches from the held-out data, with hooks for drift experiments |
+| `src/monitor/drift.py` | Compares batches against the fixed training distribution using KS, chi-square and PSI |
 | `explore_dataset.py` | Entry point: run the inspection and write the report |
 | `validate_and_preprocess.py` | Entry point: validate, fit the preprocessor on training data, save it |
 | `train_baseline.py` | Entry point: train the baseline, evaluate it, save model + metadata + metrics |
 | `simulate_batches.py` | Entry point: simulate incoming batches and score them |
-| `tests/` | 192 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction and simulation |
+| `detect_drift.py` | Entry point: compare stable and deliberately drifted batches against the reference |
+| `tests/` | 254 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation and drift |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
 | `docs/baseline_model.md` | **Phase 3 deliverable** — results, every metric explained, and limitations |
 | `docs/prediction_and_batches.md` | **Phase 4 deliverable** — the five kinds of data, label separation, batch sampling |
+| `docs/drift_detection.md` | **Phase 5 deliverable** — the statistical methods, every threshold's provenance, and two bugs found by measurement |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -232,6 +246,36 @@ truth = batch.labels                          # available later, never used abov
   24% rate instead of being pinned to it. Nothing is balanced.
 - **Batches are disjoint and reproducible** — the same seed replays the same
   sequence, and each record arrives at most once.
+
+## Detecting drift
+
+See [`docs/drift_detection.md`](docs/drift_detection.md) for the methods, every
+threshold's provenance, and the limitations.
+
+```python
+from monitor.drift import DriftDetector
+
+detector = DriftDetector(reference)                  # fixed training distribution
+report = detector.detect(batch.features, batch_id=batch.batch_id)
+
+print(report.status)        # "stable" | "moderate_drift" | "drift"
+report.to_frame()           # one row per feature, sorted by PSI
+report.to_dict()            # JSON-ready
+report.validation           # data quality, kept separate from drift
+```
+
+- **Numerical** features use a KS test plus PSI; **categorical** features use
+  chi-square plus PSI, with Cramér's V as the effect size.
+- **PSI decides the verdict, not the p-value.** With 39,073 reference rows,
+  adding 1 year to every age gives p = 1.5e-13 while PSI is 0.0081 — the report
+  says so explicitly instead of crying drift.
+- **Data-quality failures are separated from drift.** Impossible values are a
+  pipeline bug; a distribution shift is a reason to retrain.
+- **No feature is ever silently dropped.** If a statistic cannot be computed,
+  the feature is reported as `not_computed` with the reason.
+- Thresholds are configurable and recorded in every report. Two defaults
+  (`min_batch_rows=400`, `min_category_share=0.01`) were **measured** from
+  false-alarm rates on unmodified data, not guessed.
 
 ---
 
