@@ -79,6 +79,59 @@ def classification_report_text(y_true: pd.Series, y_pred) -> str:
     )
 
 
+def evaluate_predictions(
+    y_true: pd.Series, y_pred: pd.Series, y_score: pd.Series | None = None
+) -> dict:
+    """Compute every metric directly from labels and predictions.
+
+    No model is involved - just three columns that already exist, which is
+    exactly what performance monitoring has once a batch's true labels
+    finally arrive: predictions recorded at serving time, plus labels that
+    turned up later. `evaluate_classifier` below is the Phase 3 caller that
+    already has a model and calls this immediately after `.predict()`; this
+    function is the part the monitoring phase also needs, pulled out so the
+    metric logic exists in exactly one place.
+
+    `y_score` is optional. ROC-AUC needs a score, and a monitoring batch's
+    labelled subset is not guaranteed to have one (the model might not
+    support `predict_proba`, or probabilities might be missing for other
+    reasons) - `roc_auc` is `None` rather than the call failing.
+
+    Similarly, ROC-AUC is undefined when only one class is present (it needs
+    both to rank against each other). That is not possible for Phase 3's full
+    stratified test set, but it is entirely possible for a small or unlucky
+    monitoring batch, so it is guarded here rather than left to raise.
+    """
+    if len(y_true) == 0:
+        raise ValueError("Cannot evaluate on an empty dataset.")
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"Labels and predictions have different lengths: "
+            f"{len(y_true)} vs {len(y_pred)}"
+        )
+    positive = config.POSITIVE_LABEL
+
+    metrics = {
+        "n_samples": int(len(y_true)),
+        "class_distribution": class_distribution(y_true),
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision": float(precision_score(y_true, y_pred, pos_label=positive, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, pos_label=positive, zero_division=0)),
+        "f1_score": float(f1_score(y_true, y_pred, pos_label=positive, zero_division=0)),
+        "confusion_matrix": confusion_matrix_frame(y_true, y_pred).values.tolist(),
+        "confusion_matrix_labels": list(config.TARGET_LABELS),
+        "classification_report": classification_report_text(y_true, y_pred),
+    }
+
+    if y_score is not None and y_true.nunique() >= 2:
+        metrics["roc_auc"] = float(
+            roc_auc_score((y_true == positive).astype(int), y_score)
+        )
+    else:
+        metrics["roc_auc"] = None
+    return metrics
+
+
 def evaluate_classifier(pipeline, X: pd.DataFrame, y: pd.Series) -> dict:
     """Score a fitted pipeline on labelled data and return every metric.
 
@@ -93,23 +146,9 @@ def evaluate_classifier(pipeline, X: pd.DataFrame, y: pd.Series) -> dict:
             f"Features and labels have different lengths: {len(X)} vs {len(y)}"
         )
 
-    y_pred = pipeline.predict(X)
-    y_score = positive_class_scores(pipeline, X)
-    positive = config.POSITIVE_LABEL
-
-    return {
-        "n_samples": int(len(X)),
-        "class_distribution": class_distribution(y),
-        "accuracy": float(accuracy_score(y, y_pred)),
-        "precision": float(precision_score(y, y_pred, pos_label=positive, zero_division=0)),
-        "recall": float(recall_score(y, y_pred, pos_label=positive, zero_division=0)),
-        "f1_score": float(f1_score(y, y_pred, pos_label=positive, zero_division=0)),
-        # ROC-AUC needs 0/1 truth values plus a score, not the predicted labels.
-        "roc_auc": float(roc_auc_score((y == positive).astype(int), y_score)),
-        "confusion_matrix": confusion_matrix_frame(y, y_pred).values.tolist(),
-        "confusion_matrix_labels": list(config.TARGET_LABELS),
-        "classification_report": classification_report_text(y, y_pred),
-    }
+    y_pred = pd.Series(pipeline.predict(X), index=y.index)
+    y_score = pd.Series(positive_class_scores(pipeline, X), index=y.index)
+    return evaluate_predictions(y, y_pred, y_score)
 
 
 def evaluate_by_group(

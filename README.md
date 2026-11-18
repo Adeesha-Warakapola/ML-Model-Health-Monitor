@@ -9,7 +9,7 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 5 complete — data drift detection
+## Status: Phase 6 complete — prediction distribution and performance monitoring
 
 | Phase | Scope | State |
 | --- | --- | --- |
@@ -18,7 +18,8 @@ system and must not be used to make decisions about real people.
 | 3 | Baseline model training and evaluation | Done |
 | 4 | Prediction service and reproducible batch simulation | Done |
 | 5 | Numerical and categorical drift detection | Done |
-| 6+ | Performance monitoring, alert history, dashboard | Not started |
+| 6 | Prediction-distribution monitoring and performance monitoring with delayed labels | Done |
+| 7+ | Alerting, monitoring history persistence, dashboard | Not started |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -83,6 +84,7 @@ python validate_and_preprocess.py
 python train_baseline.py
 python simulate_batches.py
 python detect_drift.py
+python monitor_performance.py
 python -m pytest -q
 ```
 
@@ -94,7 +96,8 @@ python -m pytest -q
 | `python train_baseline.py` | The baseline trains, scores and saves | Metrics tables, then three `saved to` lines |
 | `python simulate_batches.py` | Batches are drawn from unseen data and scored | `Overlap 0 rows`, per-batch summaries, a variation table |
 | `python detect_drift.py` | Drift is detected in changed batches but not stable ones | Scenario 1 `STABLE`, scenarios 2–4 `DRIFT`, scenario 5 a quality failure |
-| `python -m pytest -q` | All code works | `254 passed` |
+| `python monitor_performance.py` | Data drift, prediction drift and performance move independently | Stable scenario all-clear; shifted scenario shows drift + degraded accuracy with ROC-AUC unchanged |
+| `python -m pytest -q` | All code works | `309 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -119,6 +122,12 @@ Extra flags for `detect_drift.py`:
 | `--size N` | Rows per batch (default 500) |
 | `--small-sample-demo` | Measured false-alarm rates at small batch sizes |
 | `--json` | Print one report as JSON and exit |
+
+Extra flags for `monitor_performance.py`:
+
+| Flag | Effect |
+| --- | --- |
+| `--delayed-labels` | Show labels arriving in two separate waves instead of the drift scenarios |
 
 Run `explore_dataset.py` **before** `pytest` the first time. It downloads the
 dataset from UCI (this can take a minute) and caches it in `data/`, so later
@@ -145,17 +154,21 @@ first they will simply do the download themselves. Use
 | `src/monitor/prediction.py` | Loads the saved model and scores incoming batches; refuses batches containing labels |
 | `src/monitor/simulation.py` | Draws reproducible batches from the held-out data, with hooks for drift experiments |
 | `src/monitor/drift.py` | Compares batches against the fixed training distribution using KS, chi-square and PSI |
+| `src/monitor/prediction_monitoring.py` | Compares a batch's predicted labels and confidence against the model's reference predictions (reuses `drift.py`'s PSI machinery) |
+| `src/monitor/performance_monitoring.py` | Scores accuracy once true labels arrive, with stable record IDs so labels can arrive late and in parts |
 | `explore_dataset.py` | Entry point: run the inspection and write the report |
 | `validate_and_preprocess.py` | Entry point: validate, fit the preprocessor on training data, save it |
 | `train_baseline.py` | Entry point: train the baseline, evaluate it, save model + metadata + metrics |
 | `simulate_batches.py` | Entry point: simulate incoming batches and score them |
 | `detect_drift.py` | Entry point: compare stable and deliberately drifted batches against the reference |
-| `tests/` | 254 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation and drift |
+| `monitor_performance.py` | Entry point: prediction and performance monitoring, including delayed/partial labels |
+| `tests/` | 309 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring and performance monitoring |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
 | `docs/baseline_model.md` | **Phase 3 deliverable** — results, every metric explained, and limitations |
 | `docs/prediction_and_batches.md` | **Phase 4 deliverable** — the five kinds of data, label separation, batch sampling |
 | `docs/drift_detection.md` | **Phase 5 deliverable** — the statistical methods, every threshold's provenance, and two bugs found by measurement |
+| `docs/performance_monitoring.md` | **Phase 6 deliverable** — data drift vs. prediction drift vs. performance degradation, measured as three different numbers on the same batch |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -276,6 +289,55 @@ report.validation           # data quality, kept separate from drift
 - Thresholds are configurable and recorded in every report. Two defaults
   (`min_batch_rows=400`, `min_category_share=0.01`) were **measured** from
   false-alarm rates on unmodified data, not guessed.
+
+## Prediction and performance monitoring
+
+See [`docs/performance_monitoring.md`](docs/performance_monitoring.md) for the
+full picture. **Data drift, prediction drift, and performance degradation are
+three different questions** and were measured to disagree on the same batch
+(600 rows, `age + 25`, true labels untouched):
+
+| | Stable batch | Age +25 batch |
+| --- | --- | --- |
+| Data drift (age PSI) | 0.0373 | **5.1124** |
+| Prediction drift (label PSI) | 0.0001 | 0.0324 (still stable) |
+| Prediction drift (confidence PSI) | 0.0112 | **0.1181** |
+| Performance (accuracy) | 0.8317 | **0.7683** |
+| Performance (ROC-AUC) | 0.9094 | 0.9094 (barely moved) |
+
+The input changed severely; the hard predicted-label mix barely moved because
+the threshold absorbed it; the underlying confidence scores moved more and
+earlier; and real accuracy genuinely fell while the model's ranking ability
+(ROC-AUC) stayed intact. No single one of these tells the whole story.
+
+```python
+from monitor.prediction_monitoring import PredictionMonitor
+from monitor.performance_monitoring import PerformanceMonitor, load_baseline_test_metrics
+
+prediction_monitor = PredictionMonitor.from_reference_features(service, reference_features)
+performance_monitor = PerformanceMonitor(min_labeled_sample=300)   # measured, not guessed
+
+prediction = service.predict_simulated(batch)           # no labels involved
+print(prediction_monitor.evaluate(prediction).summary())  # available immediately
+
+performance_monitor.register_batch(prediction)           # still no labels
+# ... later, maybe in several waves, maybe only partially ...
+performance_monitor.submit_labels(batch.batch_id, batch.labels)
+
+report = performance_monitor.compute_performance(
+    batch.batch_id, baseline=load_baseline_test_metrics()
+)
+```
+
+- **Predictions are recorded before any label exists**, and labels can arrive
+  later in any number of separate calls without duplicating a single record -
+  both are keyed by a stable `batch_id:row_index` identifier.
+- **Zero labels never produces a metric.** `compute_performance` returns
+  `metrics=None` rather than a fabricated number when nothing has been
+  labelled yet.
+- A labelled sample below the measured floor (`min_labeled_sample=300`,
+  chosen from how recall's sampling noise behaves on this dataset) is still
+  computed and returned, flagged rather than hidden.
 
 ---
 
