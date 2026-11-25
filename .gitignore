@@ -21,6 +21,17 @@ artifacts/
 # Monitoring history database - accumulates as the app runs, like a log file.
 monitoring/
 
+# Secrets - none are used by this project today, but if any are ever added
+# (an API key, a Streamlit secrets.toml), they must never be committed.
+.env
+.env.*
+*.pem
+*.key
+.streamlit/secrets.toml
+
+# Logs, if any script is ever pointed at a log file instead of stdout.
+*.log
+
 # OS / editor
 .DS_Store
 .vscode/
