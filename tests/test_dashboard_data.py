@@ -23,6 +23,7 @@ from monitor.dashboard_data import (
     latest_row,
     overall_batch_status,
     overall_drift_status_from_frame,
+    parse_json_field,
     performance_status_label,
     severity_counts,
     worse_status,
@@ -186,3 +187,24 @@ def test_empty_state_has_text_for_every_documented_key():
 
 def test_empty_state_falls_back_for_unknown_key():
     assert empty_state("totally_unknown_key") == "Nothing to show yet."
+
+
+def test_parse_json_field_parses_a_real_json_string():
+    assert parse_json_field('["a note"]') == ["a note"]
+    assert parse_json_field('{"accuracy": 0.8}') == {"accuracy": 0.8}
+
+
+def test_parse_json_field_treats_none_as_missing():
+    assert parse_json_field(None) is None
+    assert parse_json_field(None, default=[]) == []
+
+
+def test_parse_json_field_treats_nan_as_missing_like_a_sqlite_null():
+    """The exact bug this guards against: a SQLite NULL for an empty notes
+    list comes back from pandas as float NaN, not None, and NaN is truthy -
+    so a plain `json.loads(x) if x else default` still calls json.loads(nan)
+    and crashes with a TypeError instead of returning `default`.
+    """
+    assert parse_json_field(float("nan")) is None
+    assert parse_json_field(float("nan"), default=[]) == []
+    assert parse_json_field(float("nan"), default={}) == {}

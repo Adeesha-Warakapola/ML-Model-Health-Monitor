@@ -229,7 +229,13 @@ def render_sidebar() -> MonitoringContext:
             with st.spinner("Scoring batch, checking drift, updating alerts..."):
                 result = run_monitoring_cycle(batch, context)
             st.session_state["latest_result"] = result
-            st.session_state["latest_batch_id"] = result["batch_id"]
+            # "selected_batch_id" is the default *shown* across pages - it is
+            # also written by the Monitoring History page's "jump to batch"
+            # link, which points at an older batch nobody just ran. Keeping
+            # it separate from "latest_result" means the sidebar caption
+            # below (what was actually just run) can never be made to lie by
+            # a jump to history.
+            st.session_state["selected_batch_id"] = result["batch_id"]
             st.sidebar.success(f"Batch {result['batch_id']} processed and saved.")
 
     st.sidebar.markdown("---")
@@ -238,16 +244,18 @@ def render_sidebar() -> MonitoringContext:
         f"{context.simulator.rows_remaining:,} holdout rows left before the "
         "simulator loops back to the start."
     )
-    if st.session_state.get("latest_batch_id"):
-        st.sidebar.caption(f"Latest batch this session: `{st.session_state['latest_batch_id']}`")
+    latest_result = st.session_state.get("latest_result")
+    if latest_result:
+        st.sidebar.caption(f"Last run this session: `{latest_result['batch_id']}`")
 
     return context
 
 
-def latest_batch_id(repository: MonitoringRepository) -> str | None:
-    """The batch to show by default: this session's latest run, or else the newest in the database."""
-    if st.session_state.get("latest_batch_id"):
-        return st.session_state["latest_batch_id"]
+def default_batch_id(repository: MonitoringRepository) -> str | None:
+    """The batch to show by default: whatever is currently selected (a run or
+    a jump from history), or else the newest run in the database."""
+    if st.session_state.get("selected_batch_id"):
+        return st.session_state["selected_batch_id"]
     runs = repository.get_runs()
     if runs.empty:
         return None
@@ -260,7 +268,7 @@ def select_batch_id(repository: MonitoringRepository, key: str) -> str | None:
     if runs.empty:
         return None
     options = runs["batch_id"].tolist()
-    default_batch = latest_batch_id(repository)
+    default_batch = default_batch_id(repository)
     default_index = options.index(default_batch) if default_batch in options else 0
     return st.selectbox("Batch", options, index=default_index, key=key)
 
@@ -269,7 +277,8 @@ def live_result_for(batch_id: str | None) -> dict | None:
     """This session's full in-memory result dict, if it matches the selected batch.
 
     Returns None for any batch not just run in this session (including after
-    a dashboard restart), in which case a page should fall back to what the
+    a dashboard restart, or a jump to an older batch from the Monitoring
+    History page), in which case a page should fall back to what the
     repository persisted - which is exactly what "independent of the
     dashboard" and "survives a restart" require.
     """

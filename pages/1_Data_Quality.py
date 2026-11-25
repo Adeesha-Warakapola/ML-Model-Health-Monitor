@@ -4,9 +4,19 @@ Every validation issue - a missing-column error, a dtype mismatch, missing
 values, an unknown category, an out-of-range value - becomes exactly one
 alert in `alerts_from_validation` (`src/monitor/alerts.py`), regardless of
 severity. That means the `alerts` table, filtered to
-`category="data_quality"`, already holds the complete validation detail for
-any batch ever run - this page does not need the live `ValidationResult`
+`category="data_quality"`, holds the complete validation detail for the
+*most recent* batch - this page does not need the live `ValidationResult`
 object, and works the same right after a restart.
+
+One real limitation, found during Phase 9 integration testing and worth
+stating plainly rather than hiding: deduplication (Phase 7) moves a
+recurring alert's `batch_id` forward to whichever batch most recently
+retriggered it. So querying alerts by an *older* batch's id can come back
+empty even though that batch genuinely had the issue too - the row now
+"belongs" to a later batch. The empty-state message below only claims a
+batch is clean when it is also the latest run, where this ambiguity cannot
+exist; for any older batch, it says why zero alerts does not necessarily
+mean zero issues, rather than asserting something that might be false.
 """
 
 import sys
@@ -36,7 +46,20 @@ if batch_id is None:
 quality_alerts = repository.get_alerts(batch_id=batch_id, category="data_quality")
 
 if quality_alerts.empty:
-    st.success("No data-quality issues were raised for this batch.", icon="✅")
+    runs = repository.get_runs()
+    is_latest_batch = not runs.empty and runs.iloc[0]["batch_id"] == batch_id
+    if is_latest_batch:
+        st.success("No data-quality issues were raised for this batch.", icon="✅")
+    else:
+        st.info(
+            "No data-quality issues are currently attributed to this batch. "
+            "A recurring issue (such as a column that is consistently missing "
+            "values) is attributed to whichever batch most recently "
+            "retriggered it, so this does not guarantee this specific batch "
+            "had none - check the Alerts page's occurrence_count for the "
+            "full history of any ongoing problem.",
+            icon="ℹ️",
+        )
     st.stop()
 
 counts = severity_counts(quality_alerts)

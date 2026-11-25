@@ -9,7 +9,7 @@ system and must not be used to make decisions about real people.
 
 ---
 
-## Status: Phase 8 complete — interactive dashboard
+## Status: Phase 9 complete — system integration and comprehensive testing
 
 | Phase | Scope | State |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ system and must not be used to make decisions about real people.
 | 6 | Prediction-distribution monitoring and performance monitoring with delayed labels | Done |
 | 7 | Alert generation, deduplication, and SQLite monitoring history | Done |
 | 8 | Interactive Streamlit + Plotly dashboard over Phases 1-7 | Done |
+| 9 | End-to-end integration tests over the real pipeline, plus four bugs found and fixed by them | Done |
 
 Baseline results on the held-out test set (9,769 rows), at the
 cross-validated decision threshold of **0.29**: accuracy **0.8251**,
@@ -101,7 +102,7 @@ python -m pytest -q
 | `python monitor_performance.py` | Data drift, prediction drift and performance move independently | Stable scenario all-clear; shifted scenario shows drift + degraded accuracy with ROC-AUC unchanged |
 | `python manage_alerts.py --fresh` | Alerts are generated, deduplicated, and survive a restart | 4 scenarios, then a reopened database showing 7 alert rows (not 17+) with correct occurrence counts |
 | `streamlit run app.py` | The dashboard starts and reads the same monitoring database | Opens at `http://localhost:8501`; the Overview page shows the latest batch without training or retraining anything |
-| `python -m pytest -q` | All code works | `407 passed` |
+| `python -m pytest -q` | All code works, end to end | `446 passed` |
 
 Extra flags for `train_baseline.py`:
 
@@ -184,7 +185,7 @@ first they will simply do the download themselves. Use
 | `pages/` | The other six dashboard pages: Data Quality, Data Drift, Prediction Monitoring, Model Performance, Alerts, Monitoring History |
 | `dashboard_common.py` | Streamlit/Plotly glue shared by every page — cached monitoring context, sidebar controls, theme CSS |
 | `.streamlit/config.toml` | The dashboard's dark theme |
-| `tests/` | 407 tests across loading, exploration, validation, preprocessing, model, evaluation, tuning, prediction, simulation, drift, prediction monitoring, performance monitoring, alerts, storage, the monitoring cycle, and dashboard helpers |
+| `tests/` | 446 tests: every module above, plus `test_integration.py` and `test_dashboard_integration.py` (Phase 9) driving the real pipeline end to end |
 | `monitoring/` | SQLite monitoring history database (git-ignored, regenerated on demand) |
 | `docs/dataset_exploration.md` | **Phase 1 deliverable** — findings, generated from real data |
 | `docs/preprocessing.md` | **Phase 2 deliverable** — validation rules, pipeline design, and how it is reused for monitoring batches |
@@ -194,6 +195,7 @@ first they will simply do the download themselves. Use
 | `docs/performance_monitoring.md` | **Phase 6 deliverable** — data drift vs. prediction drift vs. performance degradation, measured as three different numbers on the same batch |
 | `docs/alert_management.md` | **Phase 7 deliverable** — severity rules, the deduplication bug found by testing and fixed, database structure |
 | `docs/dashboard.md` | **Phase 8 deliverable** — dashboard architecture, which pages are restart-safe and why, verification via `AppTest` |
+| `docs/integration_testing.md` | **Phase 9 deliverable** — four real bugs found by end-to-end testing, what was checked and already correct, the full test report |
 | `reports/baseline_metrics.json` | Measured train and test metrics (committed — small and readable) |
 | `data/` | Local dataset cache (git-ignored, regenerated on demand) |
 | `artifacts/` | Fitted preprocessor and model binaries (git-ignored, regenerated on demand) |
@@ -443,6 +445,32 @@ monitoring pipeline differently than the command line does.
   page runs with zero exceptions against both a populated and an empty
   database, and the "run a new batch"/"reset simulator" sidebar buttons were
   exercised under all three scenarios.
+
+## System integration and testing
+
+See [`docs/integration_testing.md`](docs/integration_testing.md) for the
+full report. Phase 9 drove the complete, already-built system end to end -
+the real model, the real dataset, the real database - rather than adding
+anything new, and fixed four real issues that only showed up once every
+piece ran together:
+
+- A batch that failed partway through left its database row saying
+  `status="running"` forever; it now correctly ends up `status="failed"`
+  with the error recorded.
+- The Data Quality dashboard page could claim an older batch had "no
+  issues" when deduplication had actually just moved that issue's record to
+  a more recent batch - the page now says so honestly instead.
+- Two monitoring runs saved within the same second (the timestamps are
+  recorded to second resolution throughout this project) could come back
+  from the database in the wrong order; "most recent run" is now
+  deterministic.
+- A hardcoded `300` in `monitoring_cycle.py` duplicated a constant that
+  already existed in `performance_monitoring.py`.
+
+`python -m pytest -q` → **446 passed**, including two new end-to-end suites:
+`tests/test_integration.py` (22 tests, the real pipeline) and
+`tests/test_dashboard_integration.py` (13 tests, the real dashboard reading
+real stored results).
 
 ---
 

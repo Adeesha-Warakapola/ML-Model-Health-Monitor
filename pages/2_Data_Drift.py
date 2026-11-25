@@ -8,7 +8,6 @@ recently run in this dashboard session (`dashboard_common.live_result_for`);
 older batches fall back to the saved PSI/statistic/p-value table.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -25,6 +24,7 @@ from monitor.dashboard_data import (
     format_metric,
     format_psi,
     overall_drift_status_from_frame,
+    parse_json_field,
 )
 
 dc.configure_page("Data Drift")
@@ -95,7 +95,7 @@ dc.section_label("Feature detail")
 selected_feature = st.selectbox("Feature", sorted(filtered["feature"].unique()), key="drift_feature_select")
 feature_row = drift_df[drift_df["feature"] == selected_feature].iloc[0]
 
-notes = json.loads(feature_row["notes_json"]) if feature_row.get("notes_json") else []
+notes = parse_json_field(feature_row["notes_json"], default=[])
 if notes:
     for note in notes:
         st.info(note, icon="📝")

@@ -8,7 +8,6 @@ confidence histogram - built from every individual prediction's probability
 in this session.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from monitor.dashboard_data import (
     drift_status_label,
     empty_state,
     format_metric,
+    parse_json_field,
 )
 
 dc.configure_page("Prediction Monitoring")
@@ -61,12 +61,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-notes = json.loads(row["notes_json"]) if row.get("notes_json") else []
+notes = parse_json_field(row["notes_json"], default=[])
 for note in notes:
     st.caption(f"📝 {note}")
 
 reference_dist = context.prediction_monitor.reference_label_distribution()
-batch_dist = json.loads(row["batch_label_distribution_json"]) if row.get("batch_label_distribution_json") else {}
+batch_dist = parse_json_field(row["batch_label_distribution_json"], default={})
 
 left, right = st.columns(2)
 
@@ -95,7 +95,7 @@ with right:
 
 dc.section_label("Confidence distribution (predicted probability of the positive class)")
 reference_confidence = context.prediction_monitor.reference_confidence_summary()
-batch_confidence = json.loads(row["batch_confidence_json"]) if row.get("batch_confidence_json") else {}
+batch_confidence = parse_json_field(row["batch_confidence_json"], default={})
 
 if not batch_confidence or batch_confidence.get("n", 0) == 0:
     dc.empty_panel("Probabilities were unavailable for this batch, so confidence drift could not be assessed.")

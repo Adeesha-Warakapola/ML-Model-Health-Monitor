@@ -195,6 +195,21 @@ def test_runs_can_be_filtered_by_date(repo):
     assert recent.iloc[0]["batch_id"] == "batch_2"
 
 
+def test_runs_started_in_the_same_second_still_sort_most_recent_first(repo):
+    """`started_at` only has second resolution, so several runs saved in
+    quick succession (several monitoring cycles back to back, as
+    `manage_alerts.py` and the dashboard's demo scenarios both do) can share
+    an identical timestamp. "Most recent run" must still mean the one
+    actually saved last, not an arbitrary tie-break - found by a flaky
+    integration test during Phase 9."""
+    same_timestamp = "2026-01-01T00:00:00+00:00"
+    for batch_id in ("batch_1", "batch_2", "batch_3"):
+        repo.save_run(make_run_id(), batch_id, same_timestamp)
+
+    runs = repo.get_runs()
+    assert runs.iloc[0]["batch_id"] == "batch_3"  # the one saved most recently
+
+
 # --- drift results ---------------------------------------------------------------
 
 
@@ -494,11 +509,30 @@ def test_saving_an_alert_for_a_nonexistent_run_is_rejected(repo):
 
 
 def test_storage_module_does_not_import_streamlit():
-    import sys
+    """A static check of storage.py's own import statements, not a runtime
+    check of `sys.modules` - see the matching comment on
+    `test_drift_module_does_not_depend_on_streamlit` in test_drift.py for
+    why `sys.modules` stopped being a safe thing to check once the test
+    *process* (not storage.py) also imports streamlit elsewhere, for the
+    dashboard's own tests.
+    """
+    import ast
+    import inspect
 
-    import monitor.storage  # noqa: F401
+    import monitor.storage
 
-    assert "streamlit" not in sys.modules
+    tree = ast.parse(inspect.getsource(monitor.storage))
+    imported_top_level_names = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert "streamlit" not in imported_top_level_names
 
 
 def test_repository_is_usable_with_only_plain_data_no_live_services(tmp_path):

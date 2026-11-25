@@ -8,7 +8,6 @@ persisted as JSON, so they are available for any historical run, not only
 the one most recently run in this session.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -18,7 +17,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import dashboard_common as dc
-from monitor.dashboard_data import empty_state, format_metric, performance_status_color, performance_status_label
+from monitor.dashboard_data import (
+    empty_state,
+    format_metric,
+    parse_json_field,
+    performance_status_color,
+    performance_status_label,
+)
 from monitor.performance_monitoring import NO_LABELS
 
 dc.configure_page("Model Performance")
@@ -59,7 +64,7 @@ if status == "insufficient_labels":
         icon="⚠️",
     )
 
-comparison = json.loads(row["comparison_json"]) if row.get("comparison_json") else {}
+comparison = parse_json_field(row["comparison_json"], default={})
 metric_cols = st.columns(5)
 for col, label, key in zip(
     metric_cols,
@@ -75,7 +80,7 @@ for col, label, key in zip(
         delta_color="inverse" if delta is not None and delta < 0 else "normal",
     )
 
-metrics_payload = json.loads(row["metrics_json"]) if row.get("metrics_json") else None
+metrics_payload = parse_json_field(row["metrics_json"], default=None)
 
 dc.section_label("Confusion matrix")
 if not metrics_payload or "confusion_matrix" not in metrics_payload:

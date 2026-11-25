@@ -11,7 +11,7 @@
 #
 # Verified working with: pandas 3.0.6, numpy 2.4.6, scipy 1.17.1,
 # scikit-learn 1.9.1, joblib 1.6.0, tabulate 0.10.0, ucimlrepo 0.0.7,
-# pytest 9.1.1 on Python 3.11.4.
+# pytest 9.1.1, streamlit 1.67.0, plotly 7.1.0 on Python 3.11.4.
 #
 # Evidently is deliberately NOT a dependency. See the module docstring in
 # src/monitor/drift.py: the three methods needed here are a few dozen lines on

@@ -85,34 +85,49 @@ def run_monitoring_cycle(batch: SimulatedBatch, context: MonitoringContext) -> d
     run_id = make_run_id()
     context.repository.save_run(run_id, batch.batch_id, started_at=utc_now())
 
-    prediction: BatchPrediction = context.service.predict_simulated(batch)
-    drift_report: DriftReport = context.drift_detector.detect(batch.features, batch_id=batch.batch_id)
-    prediction_report: PredictionDriftReport = context.prediction_monitor.evaluate(prediction)
+    try:
+        prediction: BatchPrediction = context.service.predict_simulated(batch)
+        drift_report: DriftReport = context.drift_detector.detect(batch.features, batch_id=batch.batch_id)
+        prediction_report: PredictionDriftReport = context.prediction_monitor.evaluate(prediction)
 
-    performance_monitor = PerformanceMonitor(min_labeled_sample=300)
-    performance_monitor.register_batch(prediction)
-    performance_monitor.submit_labels(batch.batch_id, batch.labels)
-    performance_report: PerformanceReport = performance_monitor.compute_performance(
-        batch.batch_id, baseline=context.baseline
-    )
+        # Uses PerformanceMonitor's own default (DEFAULT_MIN_LABELED_SAMPLE)
+        # rather than repeating the number here, so the two can never drift apart.
+        performance_monitor = PerformanceMonitor()
+        performance_monitor.register_batch(prediction)
+        performance_monitor.submit_labels(batch.batch_id, batch.labels)
+        performance_report: PerformanceReport = performance_monitor.compute_performance(
+            batch.batch_id, baseline=context.baseline
+        )
 
-    alerts = generate_alerts(
-        batch_id=batch.batch_id,
-        validation=prediction.validation,
-        drift=drift_report,
-        prediction_drift=prediction_report,
-        performance=performance_report,
-    )
+        alerts = generate_alerts(
+            batch_id=batch.batch_id,
+            validation=prediction.validation,
+            drift=drift_report,
+            prediction_drift=prediction_report,
+            performance=performance_report,
+        )
 
-    actual_positive_rate = (batch.labels == config.POSITIVE_LABEL).mean()
-    context.repository.save_batch_summary(
-        run_id, prediction, actual_positive_rate=actual_positive_rate,
-        n_labeled=len(batch.labels),
-    )
-    context.repository.save_drift_report(run_id, drift_report)
-    context.repository.save_prediction_drift_report(run_id, prediction_report)
-    context.repository.save_performance_report(run_id, performance_report)
-    outcomes = context.repository.save_alerts(alerts, run_id)
+        actual_positive_rate = (batch.labels == config.POSITIVE_LABEL).mean()
+        context.repository.save_batch_summary(
+            run_id, prediction, actual_positive_rate=actual_positive_rate,
+            n_labeled=len(batch.labels),
+        )
+        context.repository.save_drift_report(run_id, drift_report)
+        context.repository.save_prediction_drift_report(run_id, prediction_report)
+        context.repository.save_performance_report(run_id, performance_report)
+        outcomes = context.repository.save_alerts(alerts, run_id)
+    except Exception as error:
+        # Without this, a batch that fails partway through (a malformed
+        # batch failing validation, a storage error) leaves its run row
+        # stuck at status="running" forever - indistinguishable from a run
+        # still in progress. Recording *why* it failed, then re-raising,
+        # keeps the caller's error handling unchanged while keeping the
+        # history honest.
+        context.repository.complete_run(
+            run_id, status="failed", notes=f"{type(error).__name__}: {error}"
+        )
+        raise
+
     context.repository.complete_run(run_id)
 
     return {

@@ -9,7 +9,6 @@ or, where noted, from the live report objects for the batch just run this
 session - see `dashboard_common.live_result_for`.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from monitor.dashboard_data import (
     format_metric,
     format_timestamp,
     overall_drift_status_from_frame,
+    parse_json_field,
     performance_status_color,
     performance_status_label,
     severity_color,
@@ -137,11 +137,7 @@ with right:
         dc.empty_panel("No prediction-monitoring result recorded for this batch.")
     else:
         reference_dist = context.prediction_monitor.reference_label_distribution()
-        batch_dist = (
-            json.loads(pred_row["batch_label_distribution_json"])
-            if pred_row.get("batch_label_distribution_json")
-            else {}
-        )
+        batch_dist = parse_json_field(pred_row["batch_label_distribution_json"], default={})
         labels = sorted(set(reference_dist) | set(batch_dist))
         fig = go.Figure()
         fig.add_bar(
@@ -185,7 +181,7 @@ else:
             icon="⚠️",
         )
     metric_cols = st.columns(5)
-    comparison = json.loads(perf_row["comparison_json"]) if perf_row.get("comparison_json") else {}
+    comparison = parse_json_field(perf_row["comparison_json"], default={})
     for col, (label, key) in zip(
         metric_cols,
         [

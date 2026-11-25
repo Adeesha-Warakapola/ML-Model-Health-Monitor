@@ -248,13 +248,19 @@ class MonitoringRepository:
         except sqlite3.Error as error:
             raise MonitoringStorageError(f"Could not save run {run_id}: {error}") from error
 
-    def complete_run(self, run_id: str, status: str = "completed") -> None:
+    def complete_run(self, run_id: str, status: str = "completed", notes: str | None = None) -> None:
+        """Mark a run finished - successfully, or (status="failed") not.
+
+        `notes` records why a run failed (the exception type and message),
+        so a run that errors out is never left showing `status="running"`
+        forever with no explanation - see `monitoring_cycle.run_monitoring_cycle`.
+        """
         try:
             with self._connect() as conn:
                 conn.execute(
-                    "UPDATE monitoring_runs SET completed_at = ?, status = ? "
+                    "UPDATE monitoring_runs SET completed_at = ?, status = ?, notes = ? "
                     "WHERE run_id = ?",
-                    (_utc_now(), status, run_id),
+                    (_utc_now(), status, notes, run_id),
                 )
         except sqlite3.Error as error:
             raise MonitoringStorageError(f"Could not complete run {run_id}: {error}") from error
@@ -449,7 +455,15 @@ class MonitoringRepository:
         if end_date:
             query += " AND started_at <= ?"
             params.append(end_date)
-        query += " ORDER BY started_at DESC"
+        # `started_at` only has second resolution (see `_utc_now`), so two
+        # runs started within the same second - entirely possible when
+        # several cycles run back to back, as the dashboard's demo
+        # scenarios and the integration tests both do - would otherwise tie
+        # and sort in an unspecified order. SQLite's implicit `rowid`
+        # reflects true insertion order and breaks that tie deterministically,
+        # which matters here because "the most recent run" decides the
+        # default batch shown across every dashboard page.
+        query += " ORDER BY started_at DESC, rowid DESC"
         return self._query(query, params)
 
     def get_drift_results(

@@ -19,10 +19,10 @@ import streamlit as st
 import dashboard_common as dc
 from monitor.alerts import CRITICAL, INFO, WARNING
 from monitor.dashboard_data import (
+    drift_status_label,
     empty_state,
     overall_drift_status_from_frame,
     performance_status_label,
-    worse_status,
 )
 from monitor.performance_monitoring import NO_LABELS
 
@@ -74,7 +74,7 @@ for _, run in runs.iterrows():
             "batch_id": batch_id,
             "started_at": run["started_at"],
             "status": run["status"],
-            "data_drift": overall_drift_status_from_frame(batch_drift),
+            "data_drift": drift_status_label(overall_drift_status_from_frame(batch_drift)),
             "performance": performance_status_label(perf_status),
             "n_critical": int((batch_alerts["severity"] == CRITICAL).sum()) if not batch_alerts.empty else 0,
             "n_warning": int((batch_alerts["severity"] == WARNING).sum()) if not batch_alerts.empty else 0,
@@ -109,5 +109,5 @@ st.plotly_chart(fig, width="stretch")
 dc.section_label("Jump to a run")
 chosen = st.selectbox("Batch", history_df["batch_id"].tolist(), key="history_jump_batch")
 if st.button("View this batch on the Overview page", width="content"):
-    st.session_state["latest_batch_id"] = chosen
+    st.session_state["selected_batch_id"] = chosen
     st.switch_page("app.py")

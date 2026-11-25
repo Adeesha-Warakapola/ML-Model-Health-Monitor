@@ -10,6 +10,7 @@ Streamlit-free so it can be unit tested directly, without starting a
 dashboard.
 """
 
+import json
 from dataclasses import dataclass
 
 import pandas as pd
@@ -194,6 +195,21 @@ def format_psi(value: float | None) -> str:
 
 def format_timestamp(value: str | None) -> str:
     return value if value else "Not available yet"
+
+
+def parse_json_field(value, default=None):
+    """Parse a JSON-encoded database column, treating a missing value safely.
+
+    A SQLite NULL comes back from `pandas.read_sql_query` as NaN (a float),
+    not `None` - and `nan` is truthy in Python, so a plain
+    `json.loads(x) if x else default` still calls `json.loads(nan)` and
+    raises a confusing `TypeError`. This is the one place every dashboard
+    page should parse a nullable JSON column, so that mistake only needs
+    fixing once.
+    """
+    if _is_missing(value):
+        return default
+    return json.loads(value)
 
 
 # --- empty states ------------------------------------------------------------

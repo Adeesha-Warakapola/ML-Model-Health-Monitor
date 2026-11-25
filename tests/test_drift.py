@@ -609,11 +609,31 @@ def test_summary_and_explain_are_plain_text(detector, holdout):
 
 
 def test_drift_module_does_not_depend_on_streamlit():
-    import sys
+    """A static check of drift.py's own import statements, not a runtime
+    check of `sys.modules` - the dashboard (Phase 8) legitimately imports
+    streamlit elsewhere, and once the test *process* has imported it even
+    once (collecting test_dashboard_integration.py is enough), it stays in
+    `sys.modules` for every other test that runs afterwards. Only parsing
+    drift.py's own source says something true regardless of what else has
+    been imported in this process.
+    """
+    import ast
+    import inspect
 
-    import monitor.drift  # noqa: F401
+    import monitor.drift
 
-    assert "streamlit" not in sys.modules
+    tree = ast.parse(inspect.getsource(monitor.drift))
+    imported_top_level_names = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert "streamlit" not in imported_top_level_names
 
 
 # --- reference stays fixed --------------------------------------------------

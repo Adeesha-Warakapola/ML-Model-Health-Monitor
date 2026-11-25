@@ -97,14 +97,25 @@ not shown, rather than silently omitting it.
 | Alerts | Every deduplicated alert, filterable by severity, category, and last-seen date range | Yes |
 | Monitoring History | One combined row per run (drift/prediction/performance status, alert counts by severity), filterable by date, with a jump-to-Overview link | Yes |
 
-### Data Quality reuses the alerts table, not a new query
+### Data Quality reuses the alerts table, not a new query - with one caveat
 
 `alerts_from_validation` (Phase 7) already creates exactly one alert per
 `ValidationIssue`, errors and warnings alike - not only the ones severe
 enough to matter elsewhere. That means `get_alerts(batch_id=..., category="data_quality")`
-already *is* the complete validation detail for any batch, so the Data
-Quality page needed no new storage and no live `ValidationResult` object to
-work after a restart.
+needed no new storage and no live `ValidationResult` object for the Data
+Quality page to work after a restart.
+
+**Found during Phase 9 integration testing:** this is only exactly true for
+the *latest* batch. Deduplication (Phase 7) moves a recurring alert's
+`batch_id` forward to whichever batch most recently retriggered it, so
+querying by an older batch's id can come back empty even though that batch
+genuinely had the same issue - the row now "belongs" to a later batch. The
+page accounts for this directly: its empty state only claims a batch is
+clean when it is also the latest run (where this ambiguity cannot exist);
+for any older batch it says plainly that zero alerts does not guarantee
+zero issues, rather than asserting something that might be false. See
+`test_data_quality_page_is_honest_about_an_older_batchs_reassigned_alerts`
+in `tests/test_dashboard_integration.py`.
 
 ## Demonstration scenarios
 
